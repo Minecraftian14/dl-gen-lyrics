@@ -1,0 +1,8 @@
+.idea/
+temp/
+**/*.egg-info/
+**/__pycache__/
+src/generator_core/resources/
+
+secret_*.*
+/.obsidian/workspace.json
