@@ -1,25 +1,41 @@
-from .dataset_manager_old import *
+from .impl.Timer import Timer, TypedTimer
+from .impl.Trainer import Trainer
+from .impl.Vocabulary import SimpleVocabulary
+
+from .dataset_manager import *
 from .embed_manager import *
 from .lyrics_manager import *
 from .model_manager import *
-from .trainer import *
+from .solution_manager import *
 from .word2vec import *
 
+
 __init__ = [
-    'DatasetStreamer',
-    'catalogue',
-    'create_mapper',
+    'Timer',
+    'TypedTimer',
+    'Trainer',
+    'SimpleVocabulary',
 
 
+    'DatasetDescriptor'
+    'LocalDatasetDescriptor'
+    'CSVDatasetStreamer'
+
+    'genius_lyrics',
+    'moosehead_lyrics',
+
+    'genius_lyrics_streamer',
+    'moosehead_lyrics_streamer',
+    'movies_subtitles_streamer',
+
+    
     'Solution',
 
 
     'Trainer',
 
 
-
     'SkipGramWord2Vec',
-
 
 
 ]
