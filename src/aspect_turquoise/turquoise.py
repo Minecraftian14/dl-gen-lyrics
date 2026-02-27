@@ -1,14 +1,12 @@
+import numpy as np
+
 from generator_core import *
+from .models.M2OLSTM import M2OLSTM
 import re
 import os
 import torch
 from torch import nn
-
-
-
-
-
-
+from torch.nn.utils.rnn import pad_sequence
 
 
 class Turquoise(Solution):
@@ -65,9 +63,19 @@ class Turquoise(Solution):
         return embeds
 
     def prepare_model(self) -> nn.Module:
-        encoder = _Encoder(len(self.vocabulary))
-        decoder = _Decoder(len(self.vocabulary))
-        return SimpleEncoderDecoderModel(self.vocabulary.encode("<SONG_START>"), encoder, decoder, 'cpu')
+        return M2OLSTM(len(self.vocabulary))
+
+    def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
+        sample = torch.asarray(sample, dtype=torch.long)
+        for i in range(1, len(sample)):
+            yield sample[:i], sample[i]
+
+    def collate_batch(self, batch: list['TrainingData']) -> 'BatchedTrainingData':
+        xs, ys = list(zip(*batch))
+        lengths = torch.tensor([len(x) for x in xs])
+        xs = pad_sequence(xs, batch_first=True, padding_value=0)
+        ys = torch.stack(ys)
+        return xs, lengths, ys
 
     def train(self, model: 'nn.Module', sample: 'Sample'):
         super().train(model, sample)

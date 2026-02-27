@@ -136,6 +136,3 @@ class MovieDatasetStreamer(CSVDatasetStreamer):
         cursor = self.connection.cursor()
         cursor.execute("SELECT * FROM movies_meta")
         cursor.close()
-
-
-movies_subtitles_streamer = MovieDatasetStreamer()

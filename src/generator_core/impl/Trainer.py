@@ -4,6 +4,7 @@ import json
 import torch
 from torch import nn
 from torch.utils import data
+
 from generator_core import TypedTimer
 
 
@@ -25,7 +26,7 @@ class Trainer:
             # How many times the dataset is trained through
             epochs: int = 5,
             # Override the epochs param and only use a fraction of the whole dataset
-            epoch_fraction: float = None,
+            dataset_fraction: float = None,
 
             # Optionally provide a validation dataloader
             val_dataloader: data.DataLoader = None,
@@ -40,14 +41,16 @@ class Trainer:
             model_name=None,
 
             model_outputs_adaptor=lambda x: x,
-            model_train_step=lambda model, x, y: model(x),
+            model_train_step=lambda model, data: model(data[0]),
+
+            record_per_epoch_training_loss=False,
     ):
         self.model = model
         self.train_dataloader = train_dataloader
         self.criterion = criterion
         self.optimizer = optimizer(model.parameters())
         self.epochs = epochs
-        self.epoch_fraction = epoch_fraction
+        self.dataset_fraction = dataset_fraction
         self.val_dataloader = val_dataloader
         self.checkpoint_frequency = checkpoint_frequency
         self.lr_scheduler = lr_scheduler
@@ -56,6 +59,7 @@ class Trainer:
         self.model_name = model_name if model_name else model.__class__.__name__
         self.model_outputs_adaptor = model_outputs_adaptor
         self.model_train_step = model_train_step
+        self.record_per_epoch_training_loss = record_per_epoch_training_loss
 
         self.loss = {"train": [], "val": []}
         self.model.to(self.device)
@@ -67,15 +71,17 @@ class Trainer:
         self.model.to(device)
 
     def train(self):
-        for epoch in range(self.epochs):
-            self._train_step()
+        self.timer.start("train")
+
+        for epoch in range(1, 1 + self.epochs):
+            self._train_step(epoch)
             self._validate_step()
             print(
                 "Epoch: {}/{}, Train Loss={:.5f}, Val Loss={:.5f}".format(
                     epoch + 1,
                     self.epochs,
                     self.loss["train"][-1],
-                    self.loss["val"][-1],
+                    self.loss["val"][-1] if len(self.loss["val"]) > 0 else -1.0,
                 )
             )
 
@@ -84,31 +90,40 @@ class Trainer:
             if self.checkpoint_frequency:
                 self._save_checkpoint(epoch)
 
-    def _train_step(self):
+        self.timer.end("train")
+
+    def _train_step(self, epoch=None):
         self.timer.start("_train_step")
 
         self.model.train()
         running_loss = []
 
+        self.timer.start("train_dataloader")
         for i, batch_data in enumerate(self.train_dataloader, 1):
+            self.timer.end("train_dataloader")
             self.timer.start("batch")
-            inputs = batch_data[0].to(self.device)
-            labels = batch_data[1].to(self.device)
+            batch_data = [data.to(self.device) for data in batch_data]
+            labels = batch_data[-1].to(self.device)
             self.optimizer.zero_grad()
-            predictions = self.model_train_step(self.model, inputs, labels)
+            predictions = self.model_train_step(self.model, batch_data)
             loss = self.criterion(predictions, labels)
             loss.backward()
             self.optimizer.step()
             running_loss.append(loss.item())
             self.timer.end("batch")
 
-            if self.epoch_fraction and i > len(self.train_dataloader) * self.epoch_fraction: break
+            if self.dataset_fraction and i > self.dataset_fraction: break
 
-            if self.epoch_fraction and self.timer.drag("_train_step", 1):
+            if self.dataset_fraction and self.timer.drag("_train_step", 1):
                 self._validate_step()
+                self._log_step(epoch, running_loss[-1], tts=self.timer.since("train"))
                 self.model.train()
 
+            self.timer.start("train_dataloader")
+
         epoch_loss = np.mean(running_loss)
+        if self.record_per_epoch_training_loss:
+            self.loss["epoch.train"] = self.loss.get("epoch.train", []) + [running_loss]
         self.loss["train"].append(epoch_loss)
         self.timer.end("_train_step")
 
@@ -132,6 +147,32 @@ class Trainer:
         epoch_loss = np.mean(running_loss)
         self.loss["val"].append(epoch_loss)
         self.timer.end("_validate_step")
+
+    def _log_step(self, epoch=None, train_loss=None, val_loss=None, tts=None):
+        messages = []
+
+        if epoch is not None:
+            messages.append(f"Epoch: {epoch:2d}/{self.epochs:2d}")
+
+        if train_loss is None:
+            if len(self.loss["train"]) > 0: train_loss = self.loss["train"][-1]
+
+        if train_loss is not None:
+            messages.append(f"Train Loss: {train_loss:.2f}")
+
+        if val_loss is None:
+            if len(self.loss["val"]) > 0: val_loss = self.loss["val"][-1]
+
+        if val_loss is not None:
+            messages.append(f"Val Loss: {val_loss:.2f}")
+
+        if tts is not None:
+            messages.append(f"TTS: {tts:.2f}")
+            if epoch is not None:
+                tpe = tts / epoch
+                messages.append(f"ETA: {(self.epochs - epoch) * tpe:.2f}")
+
+        print("    ".join(messages))
 
     def _save_checkpoint(self, epoch):
         """Save model checkpoint to `self.model_dir` directory"""

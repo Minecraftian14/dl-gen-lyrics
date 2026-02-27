@@ -14,7 +14,7 @@ class SimpleVocabulary(Vocabulary):
 
     def build_vocabulary(self, token: str):
         self.word_freq[token] = self.word_freq.get(token, 0) + 1
-        if self.word_freq[token] > self.min_freq and token not in self.word2idx:
+        if self.word_freq[token] >= self.min_freq and token not in self.word2idx:
             idx = len(self.word2idx)
             self.word2idx[token] = idx
             self.idx2word[idx] = token

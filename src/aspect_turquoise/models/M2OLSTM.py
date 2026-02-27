@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 class M2OLSTM(nn.Module):
@@ -8,7 +9,7 @@ class M2OLSTM(nn.Module):
     def __init__(
             self,
             vocab_size, embed_dim=200,
-            num_layers=2, hidden_size=256, bidirectional=False,
+            num_layers=2, hidden_size=256, bidirectional=True,
     ):
         super(M2OLSTM, self).__init__()
 
@@ -37,9 +38,14 @@ class M2OLSTM(nn.Module):
             out_features=vocab_size,
         )
 
-    def forward(self, x):
+    def forward(self, x, lengths):
         embedded = self.embedding(x)
-        outputs, _ = self.lstm(embedded)
-        last_hidden = outputs[:, -1, :]
+        packed = pack_padded_sequence(embedded, lengths.cpu(), batch_first=True, enforce_sorted=False)
+        packed_outputs, _ = self.lstm(packed)
+        outputs, _ = pad_packed_sequence(packed_outputs, batch_first=True)
+
+        idx = (lengths - 1).view(-1, 1).expand(len(lengths), outputs.size(2)).unsqueeze(1)
+        last_hidden = outputs.gather(1, idx).squeeze(1)
+
         logits = self.linear(last_hidden)
         return logits

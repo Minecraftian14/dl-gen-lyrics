@@ -1,6 +1,11 @@
-import numpy as np
-from typing import Callable
 from .dataset_manager import CSVDatasetStreamer
+from .impl.Trainer import Trainer
+
+import numpy as np
+from typing import Callable, Any, Generator
+import torch
+import torch.nn as nn
+from torch.utils.data import IterableDataset, DataLoader
 
 
 class Annotation:
@@ -90,56 +95,123 @@ class Solution:
         :return: the sample according to your formulation of the Conditioning Method
         """
 
-    def prepare_model(self) -> 'nn.Module':
+    def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
+        """
+        :param sample:
+        :return:
+        """
+
+    def collate_batch(self, batch: list['TrainingData']) -> 'BatchedTrainingData':
+        """
+        :param batch:
+        :return:
+        """
+
+    def prepare_model(self) -> nn.Module:
         """
         Load an existing model or create a new one.
         """
 
-    def train(self, model: 'nn.Module', sample: 'Sample'):
+    def train(self, model: nn.Module, sample: 'Sample'):
         ...
 
-    def evaluate(self, model: 'nn.Module', sample: 'Sample'):
+    def evaluate(self, model: nn.Module, sample: 'Sample'):
         ...
 
 
 class SolutionManager:
-    def __init__(self, solution_maker: Callable[[], Solution]):
+    def __init__(self,
+                 solution_maker: Callable[[], Solution],
+                 batch_size: int = 32,
+                 ):
         self.solution_maker = solution_maker
         self.solution: Solution
+        self.streamer: CSVDatasetStreamer
+        self.vocabulary: Vocabulary
+        self.model: nn.Module
+        self.trainer: Trainer
+        self.samples_cached = False
+        self.batch_size: int
+        self.dataset: IterableDataset = None
+        self.loader: DataLoader = None
+        self.set_batch_size(batch_size)
 
-    def phase_1(self):
+    def _stream_literal_tokens(self) -> 'Generator[str]':
+        for title, artist, content, genre in self.streamer.stream():
+            content = self.solution.clean_text(content)
+            literal_tokens = self.solution.tokenize_text(content)
+            for token in literal_tokens:
+                yield token
+
+    def _stream_samples(self) -> 'Generator[Sample]':
+        for title, artist, content, genre in self.streamer.stream():
+            content = self.solution.clean_text(content)
+            annotation = self.solution.annotate_text(content)
+            literal_tokens = self.solution.tokenize_text(content)
+            indicial_tokens = np.zeros(len(literal_tokens))
+            for i, token in enumerate(literal_tokens):
+                indicial_tokens[i] = self.vocabulary.encode(token)
+            embeds = self.solution.embed_tokens(indicial_tokens)
+            sample = self.solution.inject_sample(embeds, annotation)
+            yield sample
+
+    def _stream_training_data(self) -> 'Generator[TrainingData]':
+        for sample in self._stream_samples():
+            training_data = self.solution.sample_to_training_data(sample)
+            yield from training_data
+
+    def _training_data_set(self):
+        if self.dataset: return self.dataset
+
+        class TrainingDataset(IterableDataset):
+            def __init__(self, manager):
+                self.manager: SolutionManager = manager
+
+            def __iter__(self):
+                for data in self.manager._stream_training_data():
+                    yield data
+
+        self.dataset = TrainingDataset(self)
+        return self.dataset
+
+    def _training_data_loader(self):
+        if self.loader is not None: return self.loader
+
+        self.loader = DataLoader(
+            self._training_data_set(),
+            batch_size=self.batch_size,
+            collate_fn=self.solution.collate_batch,
+        )
+        return self.loader
+
+    def prepare_solution(self):
 
         self.solution = self.solution_maker()
+        self.streamer = self.solution.load_dataset()
 
-        streamer = self.solution.load_dataset()
+        for literal_token in self._stream_literal_tokens():
+            self.vocabulary = self.solution.build_vocabulary(literal_token)
 
-        for title, artist, content, genre in streamer.stream():
+        self.solution.prepare_embedder(None)
+        self.model = self.solution.prepare_model()
+        self.trainer = Trainer(
+            model=self.model,
+            train_dataloader=self._training_data_loader(),
+            epochs=1,
+            optimizer=lambda params: torch.optim.Adam(params, lr=0.003),
+            model_train_step=lambda model, data: model(data[0], data[1]),
+            device="cuda",
+        )
 
-            content = self.solution.clean_text(content)
-
-            annotation = self.solution.annotate_text(content)
-
-            literal_tokens = self.solution.tokenize_text(content)
-
-            for token in literal_tokens:
-                vocabulary = self.solution.build_vocabulary(token)
-            indicial_tokens = np.zeros(len(literal_tokens))
-            for i, token in enumerate(literal_tokens): indicial_tokens[i] = vocabulary.encode(token)
-
-            self.solution.prepare_embedder(None)
-
-            embeds = self.solution.embed_tokens(indicial_tokens)
-
-            sample = self.solution.inject_sample(embeds, annotation)
-
-            model = self.solution.prepare_model()
-
-
-
+    def cache_samples(self):
         ...
 
     def phase_2(self):
         ...
+
+    def set_batch_size(self, batch_size):
+        self.batch_size = batch_size
+        self.loader = None
 
 
 class SolutionDeprecated:

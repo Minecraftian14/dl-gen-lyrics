@@ -49,7 +49,7 @@ class TypedTimer:
         self.timers[event_name].end()
 
     def since(self, event_name: str):
-        self.timers[event_name].since()
+        return self.timers[event_name].since()
 
     def drag(self, event_name: str, time: float):
         return self.timers[event_name].drag(time)
