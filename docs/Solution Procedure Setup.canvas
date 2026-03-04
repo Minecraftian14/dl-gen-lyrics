@@ -1,7 +1,82 @@
 {
 	"nodes":[
-		{"id":"e88ff86e3373b1d8","type":"group","x":-500,"y":-280,"width":2260,"height":1400,"label":"Solution Procedure Setup"},
-		{"id":"8462c204a686b2d2","type":"group","x":-480,"y":-220,"width":1110,"height":380,"label":"Overview"},
+		{"id":"e88ff86e3373b1d8","type":"group","x":-500,"y":-280,"width":1160,"height":2100,"label":"Solution Procedure Setup"},
+		{"id":"8462c204a686b2d2","type":"group","x":-480,"y":-220,"width":1120,"height":380,"label":"Overview"},
+		{"id":"78d39b4d39533234","type":"group","x":-480,"y":540,"width":1120,"height":260,"label":"Extract Text/Song"},
+		{"id":"821232c397531dbd","type":"group","x":-480,"y":220,"width":1120,"height":260,"label":"Dataset Manager"},
+		{"id":"c35d4bc875c3d160","type":"group","x":-480,"y":1300,"width":1120,"height":200,"label":"Conditioning Method"},
+		{"id":"31f10aa50245700b","type":"group","x":680,"y":-280,"width":620,"height":340,"label":"Additional Aspects"},
+		{"id":"089f2e2a97c1bdc6","type":"group","x":-480,"y":860,"width":1120,"height":160,"label":"Tokenize"},
+		{"id":"e535044f18589b5a","type":"group","x":-480,"y":1080,"width":1120,"height":160,"label":"Embedding"},
+		{"id":"46be557a842fe1e0","type":"group","x":-480,"y":1560,"width":740,"height":240,"label":"Model Architecture"},
+		{"id":"1826b1c91e5495ec","type":"group","x":280,"y":1560,"width":360,"height":240,"label":"Generation"},
+		{
+			"id":"b063bee83b286f9a",
+			"type":"text",
+			"text":"#### Sampling Method",
+			"styleAttributes":{"shape":"predefined-process","textAlign":"center"},
+			"x":360,
+			"y":80,
+			"width":240,
+			"height":60,
+			"color":"3"
+		},
+		{
+			"id":"0c066f1e9773ca08",
+			"type":"text",
+			"text":"### Dataset Descriptor",
+			"styleAttributes":{"textAlign":"center"},
+			"x":-460,
+			"y":240,
+			"width":260,
+			"height":60,
+			"color":"2"
+		},
+		{
+			"id":"9c8a2772d46d4dbd",
+			"type":"text",
+			"text":"**Movie Subtitle Dataset**\nThere is one exception though, the movie dataset.\nSince it contains movie metadata in a separate file, and individual lyric as separate entries in another file, the whole dataset is first evaluated into a separate SQLite database.\n\nLater, a customized instance of the data streamer is created, which can stream the data from that database.",
+			"styleAttributes":{},
+			"x":100,
+			"y":240,
+			"width":520,
+			"height":220
+		},
+		{
+			"id":"c06c2998f3e64194",
+			"type":"text",
+			"text":"### Dataset Streamer",
+			"styleAttributes":{"textAlign":"center"},
+			"x":-180,
+			"y":240,
+			"width":260,
+			"height":60,
+			"color":"2"
+		},
+		{
+			"id":"b80356afd599071e",
+			"type":"text",
+			"text":"### Embedding\nMathematical representation (compute compatible) of a song",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-460,
+			"y":1100,
+			"width":300,
+			"height":120,
+			"color":"5"
+		},
+		{
+			"id":"10959e6e7b27fef8",
+			"type":"text",
+			"text":"- Decompositional: WordNet+spaCy based trickery\n- Ontological: Like WordNet Knowledge Graphs, Wikidata\n- Distributional: Like Word2Vec, GloVe, FastText\n- Contextual: Trainable Embeddings as a part of the Model",
+			"styleAttributes":{},
+			"x":-140,
+			"y":1100,
+			"width":480,
+			"height":120
+		},
 		{
 			"id":"b9b861c7c3bb38cb",
 			"type":"text",
@@ -47,67 +122,26 @@
 			"color":"5"
 		},
 		{
-			"id":"cfe35111c82bd2c4",
+			"id":"4b3d0b8245cb0e98",
 			"type":"text",
-			"text":"### Embedding",
+			"text":"### Training",
 			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
-			"x":360,
-			"y":-120,
-			"width":240,
-			"height":60,
-			"color":"5"
-		},
-		{
-			"id":"aeab8ca6b2175212",
-			"type":"text",
-			"text":"### T/V/T Split",
-			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
-			"x":-220,
-			"y":-560,
-			"width":240,
-			"height":60,
-			"color":"5"
-		},
-		{
-			"id":"9f82c0d63c09fc69",
-			"type":"text",
-			"text":"- Train / Validation / Test split\n    \n- Make sure same artist doesn’t leak across splits (important!)\n    \n- Stratify by genre if possible",
-			"styleAttributes":{},
-			"x":-220,
-			"y":-480,
-			"width":260,
-			"height":60
-		},
-		{
-			"id":"494b8a45365df02f",
-			"type":"text",
-			"text":"### Tokenize",
-			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
-			"x":120,
-			"y":-560,
-			"width":240,
-			"height":60,
-			"color":"5"
-		},
-		{
-			"id":"6b7ec3af87d0bd68",
-			"type":"text",
-			"text":"- Word-level?\n    \n- Subword (BPE / SentencePiece)? ← Recommended\n    \n- Character-level?",
-			"styleAttributes":{},
 			"x":100,
-			"y":-480,
-			"width":260,
-			"height":60
+			"y":0,
+			"width":240,
+			"height":60,
+			"color":"5"
 		},
 		{
-			"id":"73c39ef49f2d1a9d",
+			"id":"457766282ce90f09",
 			"type":"text",
-			"text":"## Sequence Packing Strategy\n\nSince you're streaming:\n\n- Fixed length chunks?\n    \n- Sliding window?\n    \n- Respect stanza boundaries?",
-			"styleAttributes":{},
-			"x":480,
-			"y":-840,
-			"width":260,
-			"height":260
+			"text":"#### Model Architecture",
+			"styleAttributes":{"shape":"predefined-process","textAlign":"center"},
+			"x":100,
+			"y":80,
+			"width":240,
+			"height":60,
+			"color":"3"
 		},
 		{
 			"id":"26c945e0e478b930",
@@ -115,17 +149,6 @@
 			"text":"### Injected Sampling",
 			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
 			"x":-160,
-			"y":0,
-			"width":240,
-			"height":60,
-			"color":"5"
-		},
-		{
-			"id":"4b3d0b8245cb0e98",
-			"type":"text",
-			"text":"### Training",
-			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
-			"x":100,
 			"y":0,
 			"width":240,
 			"height":60,
@@ -143,17 +166,6 @@
 			"color":"3"
 		},
 		{
-			"id":"a63c3a969106a1d7",
-			"type":"text",
-			"text":"#### Structured Tokens",
-			"styleAttributes":{"shape":"predefined-process","textAlign":"center"},
-			"x":300,
-			"y":-200,
-			"width":240,
-			"height":60,
-			"color":"3"
-		},
-		{
 			"id":"296181617eeddd4c",
 			"type":"text",
 			"text":"#### Conditioning Method",
@@ -165,15 +177,36 @@
 			"color":"3"
 		},
 		{
-			"id":"457766282ce90f09",
+			"id":"f610e35b223cdc21",
 			"type":"text",
-			"text":"#### Model Architecture",
+			"text":"Additionally, we can train the embeds on song features like alliteration, syllable count, line length",
+			"styleAttributes":{},
+			"x":360,
+			"y":1100,
+			"width":260,
+			"height":120
+		},
+		{
+			"id":"a63c3a969106a1d7",
+			"type":"text",
+			"text":"#### Structured Tokens",
 			"styleAttributes":{"shape":"predefined-process","textAlign":"center"},
-			"x":100,
-			"y":80,
+			"x":300,
+			"y":-200,
 			"width":240,
 			"height":60,
 			"color":"3"
+		},
+		{
+			"id":"cfe35111c82bd2c4",
+			"type":"text",
+			"text":"### Embedding",
+			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
+			"x":360,
+			"y":-120,
+			"width":240,
+			"height":60,
+			"color":"5"
 		},
 		{
 			"id":"d124df27571d513a",
@@ -187,14 +220,182 @@
 			"color":"5"
 		},
 		{
-			"id":"b063bee83b286f9a",
+			"id":"fc4ccd55d2c8ded5",
 			"type":"text",
-			"text":"#### Sampling Method",
-			"styleAttributes":{"shape":"predefined-process","textAlign":"center"},
-			"x":360,
-			"y":80,
-			"width":240,
+			"text":"Contains original dataset header, which is used to identify which part represent the input for our model",
+			"styleAttributes":{},
+			"x":-460,
+			"y":320,
+			"width":260,
+			"height":140,
+			"color":"2"
+		},
+		{
+			"id":"aeab8ca6b2175212",
+			"type":"text",
+			"text":"### T/V/T Split",
+			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
+			"x":720,
+			"y":-260,
+			"width":260,
 			"height":60,
+			"color":"5"
+		},
+		{
+			"id":"9f82c0d63c09fc69",
+			"type":"text",
+			"text":"- Train / Validation / Test split\n    \n- Make sure same artist doesn’t leak across splits (important!)\n    \n- Stratify by genre if possible",
+			"styleAttributes":{},
+			"x":720,
+			"y":-179,
+			"width":260,
+			"height":209
+		},
+		{
+			"id":"73c39ef49f2d1a9d",
+			"type":"text",
+			"text":"Since you're streaming:\n\n- Fixed length chunks?\n    \n- Sliding window?\n    \n- Respect stanza boundaries?",
+			"styleAttributes":{},
+			"x":1000,
+			"y":-170,
+			"width":260,
+			"height":200
+		},
+		{
+			"id":"09bce45169e7ab84",
+			"type":"text",
+			"text":"### Sequence Packing",
+			"styleAttributes":{"textAlign":"center","shape":"parallelogram"},
+			"x":1000,
+			"y":-260,
+			"width":260,
+			"height":60,
+			"color":"5"
+		},
+		{
+			"id":"4757e80e62fe0d0c",
+			"type":"text",
+			"text":"**Cleaning & Normalization**\nMost stages support a caching service, through which the data being processed through different stages can be cached, thus eliminating the need to process every step until that stage again in the next run.\n\nMost notably, this is useful right before and after the embedding stage.\nThe lyrics, cleaned and tokenized can be cached to help train the embedder faster through multiple epochs. The same can be said for the model.",
+			"styleAttributes":{},
+			"x":-140,
+			"y":560,
+			"width":760,
+			"height":220
+		},
+		{
+			"id":"1a7d003fa3952544",
+			"type":"text",
+			"text":"A low memory overhead loader, which always streams the data from disk, never loading the entirety to ram",
+			"styleAttributes":{},
+			"x":-180,
+			"y":320,
+			"width":260,
+			"height":140,
+			"color":"2"
+		},
+		{
+			"id":"05e6e14204c4971f",
+			"type":"text",
+			"text":"### Extract Text/Song\n- To Lower Case\n- Removal of special characters like quotes\n- Simplifying repeated symbols",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-460,
+			"y":560,
+			"width":300,
+			"height":220,
+			"color":"5"
+		},
+		{
+			"id":"48481359427f2ce8",
+			"type":"text",
+			"text":"### Tokenize & Fortify\n- Addition of structural hints\n- Splitting into meaningful units",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-460,
+			"y":880,
+			"width":300,
+			"height":120,
+			"color":"5"
+		},
+		{
+			"id":"a2683cf3a6780437",
+			"type":"text",
+			"text":"- Word Level: Split by each word, eg, \"Hello World!\" -> \\[\"hello\", \"world\", \"!\"]\n- Subword: BPE/SentencePiece, eg, \"Highly Performant\"  -> \\[\"high\", \"-ly\", \"performance\", \"-nt\"]\n- Character Level: Split by each word, eg, \"Lower\" -> \\[\"l\", \"o\", \"w\", \"e\", \"r\"]",
+			"styleAttributes":{},
+			"x":-140,
+			"y":880,
+			"width":760,
+			"height":120
+		},
+		{
+			"id":"190d1353709eeec3",
+			"type":"text",
+			"text":"### Injected Sampling\nInjecting special references like genre and theme of a song.\nMust be sequence-invariant.\n",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-460,
+			"y":1320,
+			"width":300,
+			"height":160,
+			"color":"5"
+		},
+		{
+			"id":"216d639c7fe9108d",
+			"type":"text",
+			"text":"**Conditioning Methods**\n- Prefix: `<POP> <WORLD> Song world related song lyrics`\n- Hidden State: Hidden states are initialized using genre and theme words\n- Attention Mechanism: Keep keyword embeddings separate",
+			"styleAttributes":{},
+			"x":-140,
+			"y":1320,
+			"width":760,
+			"height":160,
+			"color":"3"
+		},
+		{
+			"id":"718f5643f58861fa",
+			"type":"text",
+			"text":"### Cell Architecture\n- RNN\n- LSTM\n- GRU\n- Transformer",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-460,
+			"y":1580,
+			"width":340,
+			"height":200,
+			"color":"3"
+		},
+		{
+			"id":"9b6d89733f07c572",
+			"type":"text",
+			"text":"### Flow Architecture\n- Many-to-One/Many-to-Many\n- Encoder-Decoder\n- Layer Depth\n- Uni/Bi-Directional",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":-100,
+			"y":1580,
+			"width":340,
+			"height":200,
+			"color":"3"
+		},
+		{
+			"id":"14c083e2125d8ceb",
+			"type":"text",
+			"text":"### Sampling Method\n- Greedy\n- Beam\n- Temperature\n- Assisted",
+			"styleAttributes":{
+				"textAlign":null,
+				"shape":null
+			},
+			"x":300,
+			"y":1580,
+			"width":320,
+			"height":200,
 			"color":"3"
 		}
 	],
@@ -299,6 +500,24 @@
 			"fromSide":"right",
 			"toNode":"d124df27571d513a",
 			"toSide":"left"
+		},
+		{
+			"id":"1bef75cdc2e7bbdd",
+			"styleAttributes":{},
+			"toFloating":false,
+			"fromNode":"0c066f1e9773ca08",
+			"fromSide":"right",
+			"toNode":"c06c2998f3e64194",
+			"toSide":"left"
+		},
+		{
+			"id":"2f5f548dd7148605",
+			"styleAttributes":{},
+			"toFloating":false,
+			"fromNode":"b063bee83b286f9a",
+			"fromSide":"top",
+			"toNode":"d124df27571d513a",
+			"toSide":"bottom"
 		}
 	],
 	"metadata":{
