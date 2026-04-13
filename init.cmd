@@ -1,3 +1,4 @@
-call C:\ProgramData\anaconda3\Scripts\activate.bat
-call conda activate pyt
-pip install -e .
+@echo off
+@REM call "C:\Beryllium Base\ENVIRONMENTS\pyt\Scripts\activate.bat"
+call ".venv\Scripts\activate.bat"
+uv pip install -e .

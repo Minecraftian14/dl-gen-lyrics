@@ -1,17 +1,21 @@
-from .dataset_manager import CSVDatasetStreamer
-from .impl.Trainer import Trainer
+from typing import Callable, Any, Generator
+from dataclasses import dataclass
 
 import numpy as np
-from typing import Callable, Any, Generator
+
 import torch
 import torch.nn as nn
 from torch.utils.data import IterableDataset, DataLoader
 
+from .dataset_manager import CSVDatasetStreamer
+from .impl.Trainer import Trainer
 
+
+@dataclass
 class Annotation:
     # Class used only for static typing purposes
     text_id: str
-    genre: list[str]
+    genre: str
     keywords: list[str]
 
 
@@ -38,7 +42,7 @@ class Solution:
         :return: Clean/normalized text
         """
 
-    def annotate_text(self, text: str) -> 'Annotation':
+    def annotate_text(self, id: int) -> 'Annotation':
         """
         An annotation is represented as:
         ```
@@ -56,13 +60,6 @@ class Solution:
         """
         :param text: The whole song or text (Usually cleaned)
         :return: Tokenized text
-        """
-
-    def build_vocabulary(self, token: str) -> 'Vocabulary':
-        """
-        This function will be called once for each token in the dataset.
-        Use it to build up the vocabulary of your model.
-        :return: Latest Vocabulary
         """
 
     def prepare_embedder(self, tokens: np.ndarray) -> np.ndarray:
@@ -185,7 +182,6 @@ class SolutionManager:
         return self.loader
 
     def prepare_solution(self):
-
         self.solution = self.solution_maker()
         self.streamer = self.solution.load_dataset()
 

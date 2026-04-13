@@ -4,6 +4,7 @@ import csv
 import json5
 import os
 import sqlite3
+import pandas as pd
 
 resources = files('generator_core').joinpath('resources')
 
@@ -31,6 +32,9 @@ class DatasetDescriptor:
 
     def open(self):
         return resources.joinpath(self.file_name).open(encoding='utf-8')
+
+    def open_as_df(self):
+        return pd.read_csv(resources.joinpath(self.file_name).open(encoding='utf-8'), chunksize=50_000)
 
 
 class LocalDatasetDescriptor(DatasetDescriptor):
