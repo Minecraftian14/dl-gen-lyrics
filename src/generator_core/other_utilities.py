@@ -69,7 +69,7 @@ def get_function_identifier(function):
     return re.search(rf"\w+\.{function.__name__}", str(function)).group(0)
 
 
-def cached(key='cached', root='temp', saver=None, loader=None):
+def cached(key='cached', root='temp', saver: Callable[[any, str], None] = None, loader: Callable[[str], None] = None):
     def decorator(function):
         group = get_function_identifier(function)
 

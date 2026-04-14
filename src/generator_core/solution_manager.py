@@ -14,7 +14,7 @@ from .impl.Trainer import Trainer
 @dataclass
 class Annotation:
     # Class used only for static typing purposes
-    text_id: str
+    text_id: int
     genre: str
     keywords: list[str]
 

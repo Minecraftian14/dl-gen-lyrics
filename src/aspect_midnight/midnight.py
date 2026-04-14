@@ -68,12 +68,12 @@ class Midnight(Solution):
 
     @staticmethod
     def tokenize_for_tfidf(text):
-        return text.split(' ')
+        # VERIFY: Specify self.custom_tokens
+        # VERIFY: Prevent keywords=['cheek', '?', 'let', ']', '[']
+        return [token for token in text.split(' ') if re.match(r"[\w']+", token)]
 
     @cached()
     def _prepare_tfidf(self):
-        # TODO: Specify self.custom_tokens and self.feature_names (force as tokens)
-        # TODO: Prevent keywords=['cheek', '?', 'let', ']', '[']
         tfidf = TfidfVectorizer(
             max_df=0.5,  # ignore very common words
             min_df=5,  # ignore rare words
@@ -86,7 +86,7 @@ class Midnight(Solution):
         return tfidf
 
     def _prepare_vocabulary(self):
-        # TODO: Specify custom_tokens
+        # VERIFY: Specify custom_tokens
         spm_file = os.path.join('temp', 'lyrics_sp.model')
         if not os.path.exists(spm_file):
             temp_save = os.path.join('temp', 'lyrics_clean.csv')
@@ -99,12 +99,13 @@ class Midnight(Solution):
                 vocab_size=16000,
                 model_type='unigram',
                 character_coverage=0.999,
+                user_defined_symbols=self.custom_tokens + self.feature_names
             )
             os.remove(temp_save)
         else:
-            print("MN Cache Loaded:", spm_file)
+            print("Loaded Cache for Midnight._prepare_vocabulary", spm_file)
         sp = spm.SentencePieceProcessor()
-        sp.load(spm_file)
+        sp.Load(spm_file)
         return sp
 
     @cached()
@@ -112,16 +113,13 @@ class Midnight(Solution):
         word2vec = Word2Vec_SkipGram(
             text_to_ids=self.tokenize_text,
             vocab_size=self.vocabulary.vocab_size(),
-            d_embeds=300,
+            d_embeds=256,
             max_norm=1.0,
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
-        word2vec.trainer.dataset_fraction = 30
+        word2vec.trainer.dataset_fraction = 10
         word2vec.train_model()
         return word2vec
-
-    def load_dataset(self) -> CSVDatasetStreamer | list[CSVDatasetStreamer]:
-        return None
 
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
@@ -163,15 +161,13 @@ class Midnight(Solution):
                 text_items.append(line.strip())
 
         text = " <NEW_LINE> ".join(text_items)
-        # text = re.sub(r"(?=[^\w<>'])", " ", text)
-        # text = re.sub(r"(?<=[^\w<>'])", " ", text)
         text = re.sub(r"([^\w<>'])", r" \1 ", text)
         text = re.sub(r"\s+", " ", text)
-        # TODO: text = '<SONG_START>' + text + '<SONG_END>'
-        #  And also add to self.custom_tokens
+        text = '<SONG_START> ' + text + ' <SONG_END>'
+        self.custom_tokens.update({'<SONG_START>', '<SONG_END>'})
         return text
 
-    def get_top_k_words(self, row, k=5):
+    def _get_top_k_words(self, row, k=5):
         row_data = row.toarray().flatten()
         top_indices = np.argsort(row_data)[-k:]
         return [self.feature_names[i] for i in top_indices if row_data[i] > 0]
@@ -179,30 +175,28 @@ class Midnight(Solution):
     def annotate_text(self, id: int) -> Annotation:
         text = self.ds_data.iloc[id]['lyrics']
         genre = self.ds_data.iloc[id]['tag']
-        context_words = self.get_top_k_words(self.tfidf.transform([text]))
+        context_words = self._get_top_k_words(self.tfidf.transform([text]))
         return Annotation(id, genre, context_words)
 
     def tokenize_text(self, text: str) -> list[str]:
         if isinstance(text, int): text = self.ds_data.iloc[text]['lyrics']
         return self.vocabulary.encode_as_ids(text)
 
-    def prepare_embedder(self, tokens: np.ndarray) -> np.ndarray:
-        # We want to train the embeddings along with the model,
-        # therefore, we return None, to tell the model that
-        # indices is the data to be fed to the model during training.
-        return None
-
-    def embed_tokens(self, tokens: np.ndarray) -> np.ndarray:
-        # We do not have an embedder, therefore, we return the tokens (indices) as is.
-        # We will train an embedder in the model itself.
-        return tokens
+    def embed_tokens(self, data):
+        if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
+        if isinstance(data, str): data = self.tokenize_text(data)
+        with torch.no_grad():
+            tokens = torch.tensor(data, dtype=torch.long)
+            embeds = self.embedder(tokens).numpy()
+        return embeds
 
     def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
         # We are not using annotations, therefore, we return the embeds as is.
         return embeds
 
     def prepare_model(self) -> nn.Module:
-        return M2OLSTM(len(self.vocabulary))
+        return None
+        # return M2OLSTM(len(self.vocabulary))
 
     def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
         sample = torch.asarray(sample, dtype=torch.long)
