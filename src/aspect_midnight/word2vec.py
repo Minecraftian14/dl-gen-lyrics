@@ -39,6 +39,7 @@ class Word2Vec_SkipGram(nn.Module):
             num_embeddings=vocab_size,
             embedding_dim=d_embeds,
             max_norm=max_norm,
+        #     TODO: padding index?
         )
         self.linear = nn.Linear(
             in_features=d_embeds,
@@ -86,7 +87,7 @@ class Word2Vec_SkipGram(nn.Module):
         self.dataloader = data.DataLoader(
             ds_data,
             batch_size=16,  # 96
-            shuffle=False,
+            shuffle=True,
             collate_fn=self.collate_fn,
         )
         self.trainer = Trainer(

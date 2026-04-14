@@ -7,9 +7,11 @@ import sentencepiece as spm
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from generator_core import *
+from .conditional_lstm_lm import ConditionalLSTMLM, ConditionalDataset
 from .word2vec import Word2Vec_SkipGram, ArrayToDatasetForW2V
 
 sure_fire_keywords = [
@@ -49,12 +51,16 @@ class Midnight(Solution):
         """
 
         self.custom_tokens = set()
+        self.genre_to_id = dict()
         self.ds_data = self._prepare_ds_data(ds_data)
         self.custom_tokens = self._get_custom_tokens()
+        self.genre_to_id = self._get_genre_dict()
+        self.id_to_genre = {v: k for k, v in self.genre_to_id.items()}
         self.tfidf = self._prepare_tfidf()
         self.feature_names = self.tfidf.get_feature_names_out()
         self.vocabulary = self._prepare_vocabulary()
         self.embedder = self._prepare_embedder()
+        self.language_model = self._prepare_language_model()
 
     @cached()
     def _prepare_ds_data(self, ds_data):
@@ -65,6 +71,10 @@ class Midnight(Solution):
     @cached()
     def _get_custom_tokens(self):
         return self.custom_tokens
+
+    @cached()
+    def _get_genre_dict(self):
+        return {g: i for i, g in enumerate(self.ds_data['tag'].unique().tolist())}
 
     @staticmethod
     def tokenize_for_tfidf(text):
@@ -113,13 +123,30 @@ class Midnight(Solution):
         word2vec = Word2Vec_SkipGram(
             text_to_ids=self.tokenize_text,
             vocab_size=self.vocabulary.vocab_size(),
-            d_embeds=256,
+            d_embeds=512,
             max_norm=1.0,
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
         word2vec.trainer.dataset_fraction = 10
         word2vec.train_model()
         return word2vec
+
+    @cached()
+    def _prepare_language_model(self):
+        lstm = ConditionalLSTMLM(
+            vocab_size=self.vocabulary.vocab_size(),
+            embedding_dim=256,
+            hidden_size=384,
+            num_layers=2,
+            num_genres=len(self.genre_to_id),
+            genre_emb_dim=64,
+            word2vec_weights=self.embedder.embeddings.weight,
+            word2vec_frozen=True,
+        )
+        lstm.prepare_train(ConditionalDataset(self))
+        lstm.trainer.dataset_fraction = 10
+        lstm.train_model()
+        return lstm
 
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
@@ -172,23 +199,73 @@ class Midnight(Solution):
         top_indices = np.argsort(row_data)[-k:]
         return [self.feature_names[i] for i in top_indices if row_data[i] > 0]
 
-    def annotate_text(self, id: int) -> Annotation:
+    def get_context_words(self, text, k=5):
+        return self._get_top_k_words(self.tfidf.transform([text]), k=k)
+
+    def annotate_text(self, id: int, k=5) -> Annotation:
         text = self.ds_data.iloc[id]['lyrics']
         genre = self.ds_data.iloc[id]['tag']
-        context_words = self._get_top_k_words(self.tfidf.transform([text]))
+        context_words = self.get_context_words(text, k=k)
         return Annotation(id, genre, context_words)
 
-    def tokenize_text(self, text: str) -> list[str]:
-        if isinstance(text, int): text = self.ds_data.iloc[text]['lyrics']
-        return self.vocabulary.encode_as_ids(text)
+    def tokenize_text(self, data: str) -> list[int]:
+        if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
+        return self.vocabulary.encode_as_ids(data)
 
+    def detokenize_ids(self, data: list[int]) -> list[str]:
+        return self.vocabulary.decode_ids(data)
+
+    @torch.no_grad()
     def embed_tokens(self, data):
         if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
         if isinstance(data, str): data = self.tokenize_text(data)
-        with torch.no_grad():
-            tokens = torch.tensor(data, dtype=torch.long)
-            embeds = self.embedder(tokens).numpy()
+        tokens = torch.tensor(data, dtype=torch.long)
+        embeds = self.embedder.embeddings(tokens).numpy()
         return embeds
+
+    @torch.no_grad()
+    def inference(self,
+                  genre: str, context_words: list[str],
+                  starting_words="",
+                  starting_token="<SONG_START>", end_token="<SONG_END>",
+                  max_len=40, temperature=1.0, top_k=50,
+                  ):
+        def ends_with(sequence, pattern):
+            seq_len, pat_len = sequence.size(1), pattern.size(0)
+            if seq_len < pat_len: return False
+            return torch.equal(sequence[0, seq_len - pat_len:], pattern)
+
+        def sample_top_k(logits, k=50):
+            k = min(k, logits.size(-1))
+            top_k_logits, top_k_indices = torch.topk(logits, k)
+            probs = F.softmax(top_k_logits, dim=-1)
+            sampled_idx = torch.multinomial(probs, num_samples=1)
+            return top_k_indices[sampled_idx]
+
+        starting_ids = self.tokenize_text(starting_token + starting_words)
+        ending_ids = self.tokenize_text(end_token)
+        genre_id = self.genre_to_id[genre]
+        context_ids = self.tokenize_text(" ".join(context_words))
+
+        device = next(self.language_model.parameters()).device
+        input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
+        ending_ids = torch.tensor(ending_ids, device=device)
+        context_ids = torch.tensor(context_ids, device=device).unsqueeze(0)
+        genre_id = torch.tensor([genre_id], device=device)
+
+        self.language_model.eval()
+        for _ in range(max_len):
+            lengths = torch.tensor([input_ids.size(1)], device=device)
+
+            preds = self.language_model(input_ids, context_ids, lengths, genre_id)
+            preds = preds[:, -1, :] / temperature
+            next_token = sample_top_k(preds.squeeze(0), k=top_k)
+
+            input_ids = torch.cat([input_ids, next_token.view(1, 1)], dim=1)
+            if ends_with(input_ids, ending_ids): break
+
+        input_ids = input_ids.squeeze(0).tolist()
+        return self.detokenize_ids(input_ids)
 
     def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
         # We are not using annotations, therefore, we return the embeds as is.
