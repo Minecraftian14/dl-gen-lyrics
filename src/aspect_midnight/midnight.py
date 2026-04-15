@@ -109,7 +109,7 @@ class Midnight(Solution):
                 vocab_size=16000,
                 model_type='unigram',
                 character_coverage=0.999,
-                user_defined_symbols=self.custom_tokens + self.feature_names
+                user_defined_symbols=list(self.custom_tokens)
             )
             os.remove(temp_save)
         else:
@@ -123,19 +123,17 @@ class Midnight(Solution):
         word2vec = Word2Vec_SkipGram(
             text_to_ids=self.tokenize_text,
             vocab_size=self.vocabulary.vocab_size(),
-            d_embeds=512,
-            max_norm=1.0,
+            d_embeds=128,
+            max_norm=None,
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
-        word2vec.trainer.dataset_fraction = 10
-        word2vec.train_model()
         return word2vec
 
     @cached()
     def _prepare_language_model(self):
         lstm = ConditionalLSTMLM(
             vocab_size=self.vocabulary.vocab_size(),
-            embedding_dim=256,
+            embedding_dim=128,
             hidden_size=384,
             num_layers=2,
             num_genres=len(self.genre_to_id),
@@ -144,8 +142,6 @@ class Midnight(Solution):
             word2vec_frozen=True,
         )
         lstm.prepare_train(ConditionalDataset(self))
-        lstm.trainer.dataset_fraction = 10
-        lstm.train_model()
         return lstm
 
     def clean_text(self, text: str) -> str:
@@ -194,6 +190,11 @@ class Midnight(Solution):
         self.custom_tokens.update({'<SONG_START>', '<SONG_END>'})
         return text
 
+    def pollute_text(self, text: str) -> str:
+        text = text.replace(' <NEW_LINE> ', '\n')
+        text = re.sub(r" <[\w ']+>", "", text)
+        return text
+
     def _get_top_k_words(self, row, k=5):
         row_data = row.toarray().flatten()
         top_indices = np.argsort(row_data)[-k:]
@@ -220,6 +221,7 @@ class Midnight(Solution):
         if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
         if isinstance(data, str): data = self.tokenize_text(data)
         tokens = torch.tensor(data, dtype=torch.long)
+        self.embedder = self.embedder.trainer.to('cpu')
         embeds = self.embedder.embeddings(tokens).numpy()
         return embeds
 

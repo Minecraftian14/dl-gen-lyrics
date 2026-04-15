@@ -142,7 +142,7 @@ class ConditionalLSTMLM(nn.Module):
         self.dataloader = data.DataLoader(
             ds_data,
             batch_size=16,
-            shuffle=False,
+            shuffle=True,
             collate_fn=ds_data.collate_fn,
         )
         self.trainer = Trainer(
@@ -151,7 +151,6 @@ class ConditionalLSTMLM(nn.Module):
             criterion=nn.CrossEntropyLoss(ignore_index=0),
             optimizer=self._optimizer,
             epochs=1,
-            dataset_fraction=10,
             device='cpu',
             record_per_batch_training_loss=True,
             model_criteria_step=ds_data.criteria_step_fn,

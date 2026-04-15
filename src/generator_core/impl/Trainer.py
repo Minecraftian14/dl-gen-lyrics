@@ -116,7 +116,8 @@ class Trainer:
 
             if self.dataset_fraction and self.timer.drag("_train_step", 1):
                 self._validate_step()
-                self._log_step(epoch, running_loss[-1], tts=self.timer.since("train"))
+                agg_loss = np.mean(running_loss[-100:]) if len(running_loss) > 100 else None
+                self._log_step(epoch, running_loss[-1], agg_loss=agg_loss, tts=self.timer.since("train"))
                 self.model.train()
 
             self.timer.start("train_dataloader")
@@ -148,7 +149,7 @@ class Trainer:
         self.loss["val"].append(epoch_loss)
         self.timer.end("_validate_step")
 
-    def _log_step(self, epoch=None, train_loss=None, val_loss=None, tts=None):
+    def _log_step(self, epoch=None, train_loss=None, agg_loss=None, val_loss=None, tts=None):
         messages = []
 
         if epoch is not None:
@@ -159,6 +160,9 @@ class Trainer:
 
         if train_loss is not None:
             messages.append(f"Train Loss: {train_loss:.2f}")
+
+        if train_loss is not None:
+            messages.append(f"Agg. Loss: {agg_loss:.2f}")
 
         if val_loss is None:
             if len(self.loss["val"]) > 0: val_loss = self.loss["val"][-1]

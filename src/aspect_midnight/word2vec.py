@@ -83,10 +83,10 @@ class Word2Vec_SkipGram(nn.Module):
     def _optimizer(self, parameters):
         return optim.AdamW(parameters, lr=0.025)
 
-    def prepare_train(self, ds_data: data.Dataset):
+    def prepare_train(self, ds_data: data.Dataset, batch_size=16):
         self.dataloader = data.DataLoader(
             ds_data,
-            batch_size=16,  # 96
+            batch_size=batch_size,  # 96 is supposed to be better? IDK
             shuffle=True,
             collate_fn=self.collate_fn,
         )
