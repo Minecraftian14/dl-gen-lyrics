@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
 
 
 class _Encoder(nn.Module):
@@ -37,6 +36,7 @@ class _Encoder(nn.Module):
         cell = torch.tanh(self.linear_cell(cell_cat)).unsqueeze(0)
 
         return hidden, cell
+
 
 class _Decoder(nn.Module):
     def __init__(self, vocab_size: int, embed_size=256, hidden_size=256, num_layers=1, dropout=0.1):
@@ -87,7 +87,6 @@ class EDLSTM(nn.Module):
         vocab_size = self.decoder.linear_out.out_features
 
         hidden, cell = self.encoder(x)
-
 
         if y is None:
             y = torch.ones(batch_size, 1, dtype=torch.long).to(self.device) * self.start_token_index

@@ -1,9 +1,10 @@
-from importlib.resources import files
-from collections.abc import Iterator
 import csv
-import json5
 import os
 import sqlite3
+from collections.abc import Iterator
+from importlib.resources import files
+
+import json5
 import pandas as pd
 
 resources = files('generator_core').joinpath('resources')

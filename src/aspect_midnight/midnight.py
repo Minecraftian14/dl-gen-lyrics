@@ -1,13 +1,6 @@
-import re
-import os
-
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
 import sentencepiece as spm
-
-import torch
-from torch import nn
 import torch.nn.functional as F
+from sklearn.feature_extraction.text import TfidfVectorizer
 from torch.nn.utils.rnn import pad_sequence
 
 from generator_core import *
@@ -32,17 +25,6 @@ structure_tokens = [
 ]
 
 
-# self.vocabulary = SimpleVocabulary({
-# "<SONG_START>",
-# "<SONG_END>",
-# "<NEW_LINE>",
-# "<INTRO>",
-# "<VERSE>",
-# "<CHORUS>",
-# "<HOOK>",
-# "<BUILD>",  # "<Pre-Hook>",
-# })
-
 class Midnight(Solution):
 
     def __init__(self, ds_data: pd.DataFrame):
@@ -52,6 +34,7 @@ class Midnight(Solution):
 
         self.custom_tokens = set()
         self.genre_to_id = dict()
+
         self.ds_data = self._prepare_ds_data(ds_data)
         self.custom_tokens = self._get_custom_tokens()
         self.genre_to_id = self._get_genre_dict()
@@ -123,7 +106,7 @@ class Midnight(Solution):
         word2vec = Word2Vec_SkipGram(
             text_to_ids=self.tokenize_text,
             vocab_size=self.vocabulary.vocab_size(),
-            d_embeds=128,
+            d_embeds=512,
             max_norm=None,
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
@@ -133,13 +116,13 @@ class Midnight(Solution):
     def _prepare_language_model(self):
         lstm = ConditionalLSTMLM(
             vocab_size=self.vocabulary.vocab_size(),
-            embedding_dim=128,
+            embedding_dim=512,
             hidden_size=384,
             num_layers=2,
             num_genres=len(self.genre_to_id),
             genre_emb_dim=64,
             word2vec_weights=self.embedder.embeddings.weight,
-            word2vec_frozen=True,
+            word2vec_frozen=False,
         )
         lstm.prepare_train(ConditionalDataset(self))
         return lstm

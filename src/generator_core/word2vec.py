@@ -1,8 +1,8 @@
+import random
+from collections import Counter
+
 import torch
 import torch.nn as nn
-import random
-
-from collections import Counter
 
 
 class Vocabulary:

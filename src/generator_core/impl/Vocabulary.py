@@ -27,4 +27,3 @@ class SimpleVocabulary(Vocabulary):
 
     def __len__(self) -> int:
         return len(self.word2idx)
-

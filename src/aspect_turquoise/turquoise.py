@@ -1,12 +1,11 @@
-import numpy as np
-
-from generator_core import *
-from .models.M2OLSTM import M2OLSTM
 import re
-import os
+
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
+
+from generator_core import *
+from .models.M2OLSTM import M2OLSTM
 
 
 class Turquoise(Solution):

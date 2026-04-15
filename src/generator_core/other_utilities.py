@@ -1,10 +1,11 @@
-import os, pickle, re
+import os
+import pickle
+import re
 from collections import defaultdict
 from typing import Callable
 
 import numpy as np
 import pandas as pd
-
 import torch
 from torch import nn
 
@@ -79,14 +80,3 @@ def cached(key='cached', root='temp', saver: Callable[[any, str], None] = None, 
         return wrapper
 
     return decorator
-
-
-class SSSS:
-    @cached("SSSS")
-    def lol(self):
-        return 456
-
-
-if __name__ == '__main__':
-    print("globals()")
-    print(SSSS().lol())

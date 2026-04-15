@@ -1,245 +1,182 @@
-from typing import Callable, Any, Generator
 from dataclasses import dataclass
 
 import numpy as np
-
 import torch
-import torch.nn as nn
-from torch.utils.data import IterableDataset, DataLoader
-
-from .dataset_manager import CSVDatasetStreamer
-from .impl.Trainer import Trainer
 
 
 @dataclass
 class Annotation:
     # Class used only for static typing purposes
-    text_id: int
+    lyrics_id: int
     genre: str
     keywords: list[str]
 
 
-class Vocabulary:
+@dataclass
+class Sample:
     # Class used only for static typing purposes
-    def encode(self, token: str) -> int: ...
+    lyrics_id: int
+    lyrics: str
+    annotation: Annotation
 
-    def decode(self, token: int) -> str: ...
 
-    def __len__(self) -> int: ...
+Unknown = int | str | Annotation | Sample
 
 
 class Solution:
 
-    def load_dataset(self) -> CSVDatasetStreamer | list[CSVDatasetStreamer]:
+    def get_lyrics(self, lyrics_id: int) -> str:
         """
-        Override this method to load your dataset and store it in self.
-        :return Either a singular streamer or multiple streamers
+        Fetches the lyrics for a given song identifier.
+
+        It is expected that the clean text function was used to preprocess the dataset.
+        Therefore, the returning lyrics being clean and custom tokens enriched.
+
+        :param lyrics_id: The unique integer identifier of the song.
+        :return: The lyrics of the song identified by the given ID.
         """
 
-    def clean_text(self, text: str) -> str:
+    def get_genre(self, lyrics_id: int) -> str:
         """
-        :param text: The whole song or text
-        :return: Clean/normalized text
+        Retrieve the genre of a song based on its lyrics ID.
+
+        :param lyrics_id: The unique identifier for the song's lyrics.
+        :return: The genre of the song associated with the given lyrics ID.
         """
 
-    def annotate_text(self, id: int) -> 'Annotation':
+    def _get_id(self, data: Unknown):
+        match data:
+            case int(): return data
+            case str(): return None
+            case Annotation(): return data.lyrics_id
+            case Sample(): return data.lyrics_id
+
+    def _get_lyrics(self, data: Unknown):
+        match data:
+            case int(): return self.get_lyrics(data)
+            case str(): return data
+            case Annotation(): return self.get_lyrics(data.lyrics_id)
+            case Sample(): return data.lyrics
+
+    def _get_genre(self, data: Unknown):
+        match data:
+            case int(): return self.get_genre(data)
+            case str(): return None
+            case Annotation(): return self.get_genre(data.lyrics_id)
+            case Sample(): return self.get_genre(data.lyrics_id)
+
+    def clean_text(self, data: Unknown) -> str:
         """
-        An annotation is represented as:
-        ```
-        {
-            "text id": "Some kind of identifier or index",
-            "genre": [ List of genres or theme of the text ],
-            "keywords": [ List of keywords present in the text ]
-        }
-        ```
-        :param text: The whole song or text (Usually cleaned)
-        :return: A dictionary of annotations
+        Given raw texts, implement this function to clean the text.
+        This involves activities like:
+        * Changing the text to lower case
+        * Managing different OSs new line paradigm
+        * Removing unnecessary special characters, especially the unicode stylistic ones
+        * Removing extra spaces
+        * This also involves enriching the text with custom tokens.
+          That's... A tricky part, since you need to parse tokens like "Chorus:", "[CHORUS]", "[Chorus: Main Singer]" to "<CHORUS>"
+        * Make sure to replace new lines with the special token "<NEW_LINE>"
+        * Also, make sure to add the <SONG_START> and <SONG_END> tokens, if not already present.
+
+        Another big responsibility of this function is to keep track of al the found custom tokens, in case recorded dynamically.
+        Otherwise, not required.
+
+        Ideally, it's better to have such things preprocessed, preventing unnecessary CPU cycles to clean text during training.
+        Therefore, use this function during the dataset loading to replace the text with clean version.
+
+        :param data: This can be anything... an int, or perhaps a string... Use self._get_lyrics(data) to get the lyrical text.
+        :return: Cleaned text
         """
 
-    def tokenize_text(self, text: str) -> list[str]:
+    def pollute_text(self, text: str) -> str:
         """
-        :param text: The whole song or text (Usually cleaned)
-        :return: Tokenized text
-        """
+        Kind of like the opposite of clean_text.
+        Basically, replace <NEW_LINE> with actual new lines and remove other structural tokens like song start and song end.
 
-    def prepare_embedder(self, tokens: np.ndarray) -> np.ndarray:
-        """
-        A one-time preparation step for the embedder.
-        Either load existing ones, extend existing ones, or train a completely new one.
-
-        :param tokens: Tokens (Usually OHE-ed)
-        :return: Embeds
-        """
-
-    def embed_tokens(self, tokens: np.ndarray) -> np.ndarray:
-        """
-        :param tokens: Tokens (Usually OHE-ed)
-        :return: Embeds
-        """
-
-    def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
-        """
-        Additional note,
-        Only the code written in your implementation will handle the Sample; therefore, no formal
-        typing is required for this. If you are not working with annotations, return the embeds.
-        If you are working with annotations, decide on a Conditioning Method; for example,
-        - You can return tuples; like (embeds, annotations)
-        - You can return combined embeds; like stacked (embeds, embedded-annotations)
-        Since you'll be writing the code to handle it, it's up to you.
-
-        :param embeds: Embeds for one text
-        :param annotation: Annotations for that text
-        :return: the sample according to your formulation of the Conditioning Method
-        """
-
-    def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
-        """
-        :param sample:
+        :param text: Polluted text
         :return:
         """
 
-    def collate_batch(self, batch: list['TrainingData']) -> 'BatchedTrainingData':
+    def get_context_words(self, text: Unknown, k=5) -> list[str]:
         """
-        :param batch:
-        :return:
+        Retrieve context words around the provided sequence of words.
+        A nice idea would be to train a TFIDF and use it to extract the most relevant words.
+
+        :param text: A sequence of words from which the context is extracted.
+        :param k: Number of words to extract before and after the central word. Defaults to 5.
+        :return: A list of tuples words
+        :rtype: list[str]
         """
 
-    def prepare_model(self) -> nn.Module:
+    def annotate_text(self, data: Unknown, k=5) -> Annotation:
         """
-        Load an existing model or create a new one.
+        Annotates a text by extracting its genre and generating context words.
+
+        This method takes the identifier of a text, extracts its corresponding
+        lyrics and genre from the dataset, and computes a set of context words
+        based on specified parameters. It then returns an Annotation object
+        containing the extracted information.
+
+        :param data: Data to get words from
+        :param k: Number of context words to extract. Defaults to 5.
+        :return: An Annotation object containing the text's ID, genre, and context words.
+        """
+        text = self._get_lyrics(data)
+        genre = self._get_genre(data)
+        context_words = self.get_context_words(text, k=k)
+        return Annotation(self._get_id(data), genre, context_words)
+
+    def tokenize_text(self, data: Unknown) -> list[int]:
+        """
+        Tokenizes a given piece of text into a list of integer IDs
+        based on the predefined vocabulary.
+
+        :param data: Input text data to be tokenized. Could be a single piece of text.
+        :return: A list of integer IDs representing the tokenized text data.
         """
 
-    def train(self, model: nn.Module, sample: 'Sample'):
-        ...
-
-    def evaluate(self, model: nn.Module, sample: 'Sample'):
-        ...
-
-
-class SolutionManager:
-    def __init__(self,
-                 solution_maker: Callable[[], Solution],
-                 batch_size: int = 32,
-                 ):
-        self.solution_maker = solution_maker
-        self.solution: Solution
-        self.streamer: CSVDatasetStreamer
-        self.vocabulary: Vocabulary
-        self.model: nn.Module
-        self.trainer: Trainer
-        self.samples_cached = False
-        self.batch_size: int
-        self.dataset: IterableDataset = None
-        self.loader: DataLoader = None
-        self.set_batch_size(batch_size)
-
-    def _stream_literal_tokens(self) -> 'Generator[str]':
-        for title, artist, content, genre in self.streamer.stream():
-            content = self.solution.clean_text(content)
-            literal_tokens = self.solution.tokenize_text(content)
-            for token in literal_tokens:
-                yield token
-
-    def _stream_samples(self) -> 'Generator[Sample]':
-        for title, artist, content, genre in self.streamer.stream():
-            content = self.solution.clean_text(content)
-            annotation = self.solution.annotate_text(content)
-            literal_tokens = self.solution.tokenize_text(content)
-            indicial_tokens = np.zeros(len(literal_tokens))
-            for i, token in enumerate(literal_tokens):
-                indicial_tokens[i] = self.vocabulary.encode(token)
-            embeds = self.solution.embed_tokens(indicial_tokens)
-            sample = self.solution.inject_sample(embeds, annotation)
-            yield sample
-
-    def _stream_training_data(self) -> 'Generator[TrainingData]':
-        for sample in self._stream_samples():
-            training_data = self.solution.sample_to_training_data(sample)
-            yield from training_data
-
-    def _training_data_set(self):
-        if self.dataset: return self.dataset
-
-        class TrainingDataset(IterableDataset):
-            def __init__(self, manager):
-                self.manager: SolutionManager = manager
-
-            def __iter__(self):
-                for data in self.manager._stream_training_data():
-                    yield data
-
-        self.dataset = TrainingDataset(self)
-        return self.dataset
-
-    def _training_data_loader(self):
-        if self.loader is not None: return self.loader
-
-        self.loader = DataLoader(
-            self._training_data_set(),
-            batch_size=self.batch_size,
-            collate_fn=self.solution.collate_batch,
-        )
-        return self.loader
-
-    def prepare_solution(self):
-        self.solution = self.solution_maker()
-        self.streamer = self.solution.load_dataset()
-
-        for literal_token in self._stream_literal_tokens():
-            self.vocabulary = self.solution.build_vocabulary(literal_token)
-
-        self.solution.prepare_embedder(None)
-        self.model = self.solution.prepare_model()
-        self.trainer = Trainer(
-            model=self.model,
-            train_dataloader=self._training_data_loader(),
-            epochs=1,
-            optimizer=lambda params: torch.optim.Adam(params, lr=0.003),
-            model_train_step=lambda model, data: model(data[0], data[1]),
-            device="cuda",
-        )
-
-    def cache_samples(self):
-        ...
-
-    def phase_2(self):
-        ...
-
-    def set_batch_size(self, batch_size):
-        self.batch_size = batch_size
-        self.loader = None
-
-
-class SolutionDeprecated:
-    def __init__(self):
-        self.stream: None
-
-    def step_1_tokenize(self, sentence: str) -> list[str]:
+    def detokenize_ids(self, data: list[int]) -> str:
         """
-        Convert the thing to a list of words, tokens and whatever magic you are cooking
-        """
-        ...
+        Detokenizes a list of token IDs into their corresponding string representations
+        using the associated vocabulary. This function takes a list of integers representing
+        token IDs and returns the decoded string.
 
-    def step_2_cache_dataset(self):
+        :param data: A list of integers which are token IDs to be converted into strings.
+        :return: A string obtained by decoding the token IDs using the vocabulary.
         """
-        Reads and caches a dataset and saves its stream locally
-        """
-        ...
 
-    def step_3_setup_embedder(self):
+    @torch.no_grad()
+    def embed_tokens(self, data: Unknown) -> np.ndarray:
         """
-        Create or Load an existing embedder
-        """
-        ...
+        Embeds input tokens into numerical vectors using the model's embedding layer.
 
-    def step_4_embed(self, tokens: list[str]) -> np.ndarray:
-        """
-        Embed the given stuff
-        """
-        ...
+        This method preprocesses the input data by tokenizing and converting
+        it into tensors. The tokenized data is passed through the embedding layer
+        of the model to produce corresponding embeddings in NumPy array format.
 
-    def step_5_setup_model(self):
+        :param data: Text input or lyrics data to be embedded.
+        :return: A NumPy array of embeddings corresponding to the tokenized input.
         """
-        Create or Load an existing model
+
+    @torch.no_grad()
+    def inference(self,
+                  genre: str, context_words: list[str],
+                  starting_words="",
+                  starting_token="<SONG_START>", end_token="<SONG_END>",
+                  max_len=40, temperature=1.0, top_k=50,
+                  ):
         """
-        ...
+        Generates a sequence of text based on the specified genre, context, and
+        given starting words using a language model. The method uses sampling
+        from the model with `top-k` sampling and temperature scaling.
+
+        :param genre: The genre of the generated text. This should be a string corresponding to a valid genre recognized by the model.
+        :param context_words: A list of additional context words or phrases to aid generation.
+        :param starting_words: A string with words to initiate the generated text. Defaults to an empty string.
+        :param starting_token: A special beginning token to mark the start of the text. Defaults to "<SONG_START>".
+        :param end_token: A special ending token that signifies the end of the generated text. Defaults to "<SONG_END>".
+        :param max_len: The maximum length for the generated sequence. Defaults to 40.
+        :param temperature: The temperature scaling for sampling. Higher values generate more diverse text, while lower values result in more deterministic predictions. Defaults to 1.0.
+        :param top_k: The number of top predictions to consider when sampling the next token. Defaults to 50.
+        :return: A string containing the complete generated text sequence.
+        """

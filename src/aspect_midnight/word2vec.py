@@ -1,9 +1,7 @@
-import random, tqdm
+import random
 
 import torch
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as data
 
@@ -39,7 +37,7 @@ class Word2Vec_SkipGram(nn.Module):
             num_embeddings=vocab_size,
             embedding_dim=d_embeds,
             max_norm=max_norm,
-        #     TODO: padding index?
+            #     TODO: padding index?
         )
         self.linear = nn.Linear(
             in_features=d_embeds,
