@@ -1,0 +1,3 @@
+[submodule "src/dl_trainer"]
+	path = src/dl_trainer
+	url = https://github.com/Minecraftian14/dl_trainer.git

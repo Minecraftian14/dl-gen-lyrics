@@ -1,6 +1,5 @@
 from .dataset_manager import *
 from .embed_manager import *
-from .impl.Vocabulary import SimpleVocabulary
 from .lyrics_manager import *
 from .model_manager import *
 from .other_utilities import *
