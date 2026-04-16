@@ -1,11 +1,9 @@
-import sentencepiece as spm
 import torch.nn.functional as F
-from sklearn.feature_extraction.text import TfidfVectorizer
 from torch.nn.utils.rnn import pad_sequence
 
+from aspect_midnight import Midnight
 from generator_core import *
-from .conditional_lstm_lm import ConditionalLSTMLM, ConditionalDataset
-from .word2vec import Word2Vec_SkipGram, ArrayToDatasetForW2V
+from .encoder_decoder import EncoderDecoderLSTM, SlidingWindowDataset, SlidingWindowDatasetTruncated
 
 sure_fire_keywords = [
     "chorus", "verse", "stanza", "interlude",
@@ -25,109 +23,37 @@ structure_tokens = [
 ]
 
 
-class Midnight(Solution):
+class Red(Solution):
 
-    def __init__(self, ds_data: pd.DataFrame, skip_model_loading=False):
+    def __init__(self, ds_data: pd.DataFrame):
         """
         Initialize all mid-state helpers
         """
 
-        self.custom_tokens = set()
-        self.genre_to_id = dict()
+        # For accessing shared tokenizer and embeddings
+        self.midnight = Midnight(ds_data, skip_model_loading=True)
 
-        self.ds_data = self._prepare_ds_data(ds_data)
-        self.custom_tokens = self._get_custom_tokens()
-        self.genre_to_id = self._get_genre_dict()
-        self.id_to_genre = {v: k for k, v in self.genre_to_id.items()}
-        self.tfidf = self._prepare_tfidf()
-        self.feature_names = self.tfidf.get_feature_names_out()
-        self.vocabulary = self._prepare_vocabulary()
-        self.embedder = self._prepare_embedder()
-
-        if not skip_model_loading:
-            self.language_model = self._prepare_language_model()
-
-    @cached()
-    def _prepare_ds_data(self, ds_data):
-        ds_data = ds_data.copy()
-        ds_data['lyrics'] = ds_data['lyrics'].apply(self.clean_text)
-        return ds_data
-
-    @cached()
-    def _get_custom_tokens(self):
-        return self.custom_tokens
-
-    @cached()
-    def _get_genre_dict(self):
-        return {g: i for i, g in enumerate(self.ds_data['tag'].unique().tolist())}
-
-    @staticmethod
-    def tokenize_for_tfidf(text):
-        # VERIFY: Specify self.custom_tokens
-        # VERIFY: Prevent keywords=['cheek', '?', 'let', ']', '[']
-        return [token for token in text.split(' ') if re.match(r"[\w']+", token)]
-
-    @cached()
-    def _prepare_tfidf(self):
-        tfidf = TfidfVectorizer(
-            max_df=0.5,  # ignore very common words
-            min_df=5,  # ignore rare words
-            stop_words='english',
-            max_features=50000,  # limit vocab size TODO: Optimize for this value
-            token_pattern=None,
-            tokenizer=Midnight.tokenize_for_tfidf,
-        )
-        tfidf.fit(self.ds_data['lyrics'])
-        return tfidf
-
-    def _prepare_vocabulary(self):
-        # VERIFY: Specify custom_tokens
-        spm_file = os.path.join('temp', 'lyrics_sp.model')
-        if not os.path.exists(spm_file):
-            temp_save = os.path.join('temp', 'lyrics_clean.csv')
-            with open(os.path.join('temp', 'lyrics_clean.csv'), 'w', encoding='utf-8') as f:
-                for lyric in self.ds_data['lyrics']:
-                    f.write(lyric + '\n')
-            spm.SentencePieceTrainer.Train(
-                input=temp_save,
-                model_prefix=spm_file.replace('.model', ''),
-                vocab_size=16000,
-                model_type='unigram',
-                character_coverage=0.999,
-                user_defined_symbols=list(self.custom_tokens)
-            )
-            os.remove(temp_save)
-        else:
-            print("Loaded Cache for Midnight._prepare_vocabulary", spm_file)
-        sp = spm.SentencePieceProcessor()
-        sp.Load(spm_file)
-        return sp
-
-    @cached()
-    def _prepare_embedder(self):
-        word2vec = Word2Vec_SkipGram(
-            text_to_ids=self.tokenize_text,
-            vocab_size=self.vocabulary.vocab_size(),
-            d_embeds=512,
-            max_norm=None,
-        )
-        word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
-        return word2vec
+        self.ds_data: pd.DataFrame = self.midnight.ds_data
+        self.custom_tokens = self.midnight.custom_tokens
+        self.genre_to_id = self.midnight.genre_to_id
+        self.id_to_genre = self.midnight.id_to_genre
+        self.tfidf = self.midnight.tfidf
+        self.feature_names = self.midnight.feature_names
+        self.vocabulary = self.midnight.vocabulary
+        self.embedder = self.midnight.embedder
+        self.language_model = self._prepare_language_model()
 
     @cached()
     def _prepare_language_model(self):
-        lstm = ConditionalLSTMLM(
+        edm = EncoderDecoderLSTM(
             vocab_size=self.vocabulary.vocab_size(),
-            embedding_dim=512,
-            hidden_size=384,
+            embed_dim=512,
+            hidden_dim=512,
             num_layers=2,
-            num_genres=len(self.genre_to_id),
-            genre_emb_dim=64,
-            word2vec_weights=self.embedder.embeddings.weight,
-            word2vec_frozen=False,
+            embeddings_weight=self.embedder.embeddings.weight,
         )
-        lstm.prepare_train(ConditionalDataset(self))
-        return lstm
+        edm.prepare_train(SlidingWindowDatasetTruncated(self))
+        return edm
 
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
@@ -231,21 +157,19 @@ class Midnight(Solution):
 
         starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
-        genre_id = self.genre_to_id[genre]
+        genre_id = self.tokenize_text(genre)
         context_ids = self.tokenize_text(" ".join(context_words))
+        annotation_ids = genre_id + context_ids
 
         device = next(self.language_model.parameters()).device
         input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
         ending_ids = torch.tensor(ending_ids, device=device)
-        context_ids = torch.tensor(context_ids, device=device).unsqueeze(0)
-        genre_id = torch.tensor([genre_id], device=device)
+        annotation_ids = torch.tensor([annotation_ids], device=device)
 
         self.language_model.eval()
         for _ in range(max_len):
-            lengths = torch.tensor([input_ids.size(1)], device=device)
-
-            preds = self.language_model(input_ids, context_ids, lengths, genre_id)
-            preds = preds[:, -1, :] / temperature
+            preds = self.language_model(annotation_ids, input_ids)
+            preds = preds / temperature
             next_token = sample_top_k(preds.squeeze(0), k=top_k)
 
             input_ids = torch.cat([input_ids, next_token.view(1, 1)], dim=1)

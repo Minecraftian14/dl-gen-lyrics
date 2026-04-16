@@ -4,5 +4,7 @@ temp/
 **/__pycache__/
 src/generator_core/resources/
 
-secret_*.*
+secret*.*
 /.obsidian/workspace.json
+
+uv.lock
