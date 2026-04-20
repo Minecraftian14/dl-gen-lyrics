@@ -44,10 +44,10 @@ from nltk.translate.bleu_score import (
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-import config
-from src.model.bigru import BiGRULyricsModel
-from src.preprocessing.tokenizer import LyricsTokenizer
-from src.inference.generator import LyricsGenerator
+from ..GRU import config
+from ..model.bigru import BiGRULyricsModel
+from ..preprocessing.tokenizer import LyricsTokenizer
+from ..inference.generator import LyricsGenerator
 
 logger = logging.getLogger(__name__)
 smoother = SmoothingFunction().method4

@@ -57,7 +57,7 @@ import torch.nn.functional as F
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-import config
+from ..GRU import config
 
 
 class BiGRULyricsModel(nn.Module):
@@ -81,6 +81,8 @@ class BiGRULyricsModel(nn.Module):
         num_layers:  int   = config.NUM_LAYERS,
         dropout:     float = config.DROPOUT,
         pad_id:      int   = 0,
+        word2vec_weights=None,
+        word2vec_frozen=True,
     ) -> None:
         super().__init__()
 
@@ -94,10 +96,15 @@ class BiGRULyricsModel(nn.Module):
         self.num_directions = 2  # BiGRU
 
         # ── Embedding ──────────────────────────────────────────────────
-        self.embedding = nn.Embedding(
-            vocab_size, embed_dim, padding_idx=pad_id
-        )
-        nn.init.uniform_(self.embedding.weight, -0.1, 0.1)
+        if word2vec_weights is not None:
+            self.embedding = nn.Embedding.from_pretrained(
+                word2vec_weights, freeze=word2vec_frozen, padding_idx=pad_id
+            )
+        else:
+            self.embedding = nn.Embedding(
+                vocab_size, embed_dim, padding_idx=pad_id
+            )
+            nn.init.uniform_(self.embedding.weight, -0.1, 0.1)
         self.embed_drop = nn.Dropout(dropout)
 
         # ── BiGRU Stack ────────────────────────────────────────────────

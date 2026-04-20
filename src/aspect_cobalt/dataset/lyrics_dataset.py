@@ -25,7 +25,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-import config
+from ..GRU import config
 
 logger = logging.getLogger(__name__)
 

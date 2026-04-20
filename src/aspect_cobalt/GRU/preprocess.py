@@ -28,10 +28,10 @@ import numpy as np
 import pandas as pd
 
 import config
-from src.preprocessing.cleaner   import clean_lyrics, clean_genre
-from src.preprocessing.annotator import annotate_dataframe, ThemeExtractor
-from src.preprocessing.tokenizer import LyricsTokenizer
-from src.dataset.lyrics_dataset   import save_token_sequences
+from ..preprocessing.cleaner   import clean_lyrics, clean_genre
+from ..preprocessing.annotator import annotate_dataframe, ThemeExtractor
+from ..preprocessing.tokenizer import LyricsTokenizer
+from ..dataset.lyrics_dataset   import save_token_sequences
 
 
 # ─────────────────────────────────────────────

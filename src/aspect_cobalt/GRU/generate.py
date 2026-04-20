@@ -34,9 +34,9 @@ import argparse
 import torch
 
 import config
-from src.preprocessing.tokenizer import LyricsTokenizer
-from src.training.trainer         import Trainer
-from src.inference.generator      import LyricsGenerator
+from ..preprocessing.tokenizer  import LyricsTokenizer
+from ..training.trainer         import Trainer
+from ..inference.generator      import LyricsGenerator
 
 logging.basicConfig(
     level=logging.INFO,

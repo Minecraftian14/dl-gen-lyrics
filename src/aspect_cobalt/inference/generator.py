@@ -27,10 +27,10 @@ import torch.nn.functional as F
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-import config
-from src.model.bigru import BiGRULyricsModel
-from src.preprocessing.tokenizer import LyricsTokenizer
-from src.preprocessing.annotator import (
+from ..GRU import config
+from ..model.bigru import BiGRULyricsModel
+from ..preprocessing.tokenizer import LyricsTokenizer
+from ..preprocessing.annotator import (
     genre_to_token,
     normalize_genre,
     ThemeExtractor,

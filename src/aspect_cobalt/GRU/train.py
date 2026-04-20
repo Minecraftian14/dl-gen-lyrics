@@ -28,12 +28,12 @@ import numpy as np
 import torch
 
 import config
-from src.preprocessing.tokenizer import LyricsTokenizer
-from src.dataset.lyrics_dataset  import build_dataloaders, load_token_sequences
-from src.model.bigru             import BiGRULyricsModel
-from src.training.trainer        import Trainer
-from src.inference.generator     import LyricsGenerator
-from src.evaluation.evaluator    import Evaluator
+from ..preprocessing.tokenizer import LyricsTokenizer
+from ..dataset.lyrics_dataset  import build_dataloaders, load_token_sequences
+from ..model.bigru             import BiGRULyricsModel
+from ..training.trainer        import Trainer
+from ..inference.generator     import LyricsGenerator
+from ..evaluation.evaluator    import Evaluator
 
 
 # ─────────────────────────────────────────────

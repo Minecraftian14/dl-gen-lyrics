@@ -33,8 +33,8 @@ from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
-import config
-from src.model.bigru import BiGRULyricsModel
+from ..GRU import config
+from ..model.bigru import BiGRULyricsModel
 
 logger = logging.getLogger(__name__)
 
