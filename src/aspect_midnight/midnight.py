@@ -170,7 +170,7 @@ class Midnight(Solution):
         text = re.sub(r"([^\w<>'])", r" \1 ", text)
         text = re.sub(r"\s+", " ", text)
         text = '<SONG_START> ' + text + ' <SONG_END>'
-        self.custom_tokens.update({'<SONG_START>', '<SONG_END>'})
+        self.custom_tokens.update({'<SONG_START>', '<SONG_END>','<NEW_LINE>'})
         return text
 
     def pollute_text(self, text: str) -> str:

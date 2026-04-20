@@ -6,8 +6,60 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as data
+from torch.nn.utils.rnn import pad_sequence
 
 
+class TransformerDataset(data.Dataset):
+    def __init__(self, teal):
+        self.teal = teal
+
+    def __len__(self):
+        return len(self.teal.ds_data)
+
+    def __getitem__(self, index):
+        teal = self.teal
+        sample = teal.ds_data.iloc[index]
+
+        lyrics = sample['lyrics']
+        tag = sample['tag']
+
+        # tokenize lyrics
+        tokens = teal.tokenize_text(lyrics)
+
+        # get context words
+        context_words = teal.get_context_words(lyrics)
+
+        # genre token
+        genre_token = f"genre {tag}"
+
+        # build conditioning text
+        cond_text = genre_token + " " + " ".join(context_words)
+
+        # tokenize conditioning
+        cond_tokens = teal.tokenize_text(cond_text)
+
+        return tokens, cond_tokens
+
+    def collate_fn(self, batch):
+        tokens, cond_tokens = zip(*batch)
+
+        input_ids = []
+        target_ids = []
+
+        # MAX_LEN = 128
+
+        for t, c in zip(tokens, cond_tokens):
+            full = c + t
+
+            input_ids.append(torch.tensor(full[:-1], dtype=torch.long))
+            target_ids.append(torch.tensor(full[1:], dtype=torch.long))
+
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
+        target_ids = pad_sequence(target_ids, batch_first=True, padding_value=0)
+
+        return (input_ids,), target_ids
+        
+        
 class SinusoidalPE(nn.Module):
     def __init__(self, d_model, max_len=3000):
         super().__init__()
@@ -71,7 +123,10 @@ class MultiHeadAttention(nn.Module):
         self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
 
     def forward(self, x):
-        out, _ = self.attn(x, x, x)
+        B, T, _ = x.shape
+        mask = torch.triu(torch.ones(T, T, device=x.device), diagonal=1).bool()
+
+        out, _ = self.attn(x, x, x, attn_mask=mask)
         return out
 
 class SimpleGQA(nn.Module):
@@ -115,10 +170,14 @@ class SimpleGQA(nn.Module):
         # Now: (B, n_heads, T, head_dim)
 
         # Attention
-        attn = torch.softmax(
-            (q @ k.transpose(-2, -1)) / np.sqrt(self.head_dim),
-            dim=-1
-        )
+        # Compute attention scores
+        attn = (q @ k.transpose(-2, -1)) / np.sqrt(self.head_dim)
+        
+        mask = torch.triu(torch.ones(T, T, device=x.device), diagonal=1).bool()
+        attn = attn.masked_fill(mask, float('-inf'))
+        
+        # Softmax
+        attn = torch.softmax(attn, dim=-1)
 
         out = attn @ v  # (B, n_heads, T, head_dim)
 
@@ -179,7 +238,7 @@ class TransformerModel(nn.Module):
         if embedding_weights is None:
             self.embed = nn.Embedding(vocab_size, config["d_model"])
         else:
-            self.embed = nn.Embedding.from_pretrained(embedding_weights, freeze=True, padding_idx=0)
+            self.embed = nn.Embedding.from_pretrained(embedding_weights, freeze=False, padding_idx=0)
 
         self.pe_type = config["pe"]
 

@@ -6,6 +6,10 @@ from torch.nn.utils.rnn import pad_sequence
 from generator_core import *
 from aspect_midnight import Word2Vec_SkipGram, ArrayToDatasetForW2V
 
+from .transformer_lm import TransformerModel, TransformerDataset
+
+from dl_trainer import Trainer
+
 sure_fire_keywords = [
     "chorus", "verse", "stanza", "interlude",
 ]
@@ -35,14 +39,18 @@ class Teal(Solution):
         self.genre_to_id = dict()
 
         self.ds_data = self._prepare_ds_data(ds_data)
+        # for g in self.ds_data['tag'].unique():
+        #     self.custom_tokens.add(f"<GENRE_{g.upper()}>")
         self.custom_tokens = self._get_custom_tokens()
+        self.custom_tokens.add('<NEW_LINE>')
         self.genre_to_id = self._get_genre_dict()
         self.id_to_genre = {v: k for k, v in self.genre_to_id.items()}
         self.tfidf = self._prepare_tfidf()
         self.feature_names = self.tfidf.get_feature_names_out()
+        
         self.vocabulary = self._prepare_vocabulary()
         self.embedder = self._prepare_embedder()
-        # self.language_model = self._prepare_language_model()
+        self.language_model = self._prepare_language_model()
 
     @cached()
     def _prepare_ds_data(self, ds_data):
@@ -110,21 +118,56 @@ class Teal(Solution):
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
         return word2vec
+    
+    
+    def model_train_step(self, model, data):
+        return model(data[0])
+    
+    def model_criteria_step(self, criterion, preds, truth):
+        preds = preds.permute(0, 2, 1)  # (B, V, T)
+        return criterion(preds, truth)
 
     @cached()
     def _prepare_language_model(self):
-        lstm = ConditionalLSTMLM(
+        config = {
+            "d_model": 512,
+            "n_heads": 4,
+            "n_layers": 4,
+            "ffn": "gelu",
+            "norm": "layernorm",
+            "attn": "gqa",
+            "n_groups": 2,
+            "pe": "sinusoidal",
+        }
+    
+        model = TransformerModel(
             vocab_size=self.vocabulary.vocab_size(),
-            embedding_dim=512,
-            hidden_size=384,
-            num_layers=2,
-            num_genres=len(self.genre_to_id),
-            genre_emb_dim=64,
-            word2vec_weights=self.embedder.embeddings.weight,
-            word2vec_frozen=False,
+            config=config,
+            embedding_weights=self.embedder.embeddings.weight
         )
-        lstm.prepare_train(ConditionalDataset(self))
-        return lstm
+    
+        dataset = TransformerDataset(self)
+    
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=10,
+            shuffle=True,
+            collate_fn=dataset.collate_fn
+        )
+        
+        model.trainer = Trainer(
+            model=model,
+            train_dataloader=dataloader,
+            criterion=torch.nn.CrossEntropyLoss(ignore_index=0),
+            model_train_step=self.model_train_step,
+            model_criteria_step=self.model_criteria_step,
+            epochs=1,
+            device='cuda',
+            record_per_batch_training_loss=True,
+            checkpoint_frequency_batch=10,
+        )
+    
+        return model
 
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
@@ -226,22 +269,26 @@ class Teal(Solution):
             sampled_idx = torch.multinomial(probs, num_samples=1)
             return top_k_indices[sampled_idx]
 
-        starting_ids = self.tokenize_text(starting_token + starting_words)
+        genre_token = f"<GENRE_{genre.upper()}>"
+        cond_text = genre_token + " " + " ".join(context_words)
+
+        starting_ids = self.tokenize_text(cond_text + " " + starting_token + starting_words)
+        # starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
-        genre_id = self.genre_to_id[genre]
-        context_ids = self.tokenize_text(" ".join(context_words))
+        # genre_id = self.genre_to_id[genre]
+        # context_ids = self.tokenize_text(" ".join(context_words))
 
         device = next(self.language_model.parameters()).device
         input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
         ending_ids = torch.tensor(ending_ids, device=device)
-        context_ids = torch.tensor(context_ids, device=device).unsqueeze(0)
-        genre_id = torch.tensor([genre_id], device=device)
+        # context_ids = torch.tensor(context_ids, device=device).unsqueeze(0)
+        # genre_id = torch.tensor([genre_id], device=device)
 
         self.language_model.eval()
         for _ in range(max_len):
-            lengths = torch.tensor([input_ids.size(1)], device=device)
+            # lengths = torch.tensor([input_ids.size(1)], device=device)
 
-            preds = self.language_model(input_ids, context_ids, lengths, genre_id)
+            preds = self.language_model(input_ids)
             preds = preds[:, -1, :] / temperature
             next_token = sample_top_k(preds.squeeze(0), k=top_k)
 
