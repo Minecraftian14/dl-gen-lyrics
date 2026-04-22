@@ -1,1 +1,1 @@
-from .cobalt import CobaltDataset, Cobalt
+from .cobalt import Cobalt
