@@ -1,9 +1,9 @@
 import torch.nn.functional as F
 from torch.utils import data
 
-from aspect_midnight import Midnight
 from generator_core import *
-from .model.bigru import BiGRULyricsModel
+from aspect_midnight import Midnight
+from aspect_tetra import BiGRULyricsModel
 
 sure_fire_keywords = [
     "chorus", "verse", "stanza", "interlude",
