@@ -129,6 +129,21 @@ class Midnight(Solution):
         lstm.prepare_train(ConditionalDataset(self))
         return lstm
 
+    def get_lyrics(self, lyrics_id: int) -> str:
+        return self.ds_data.iloc[lyrics_id]['lyrics']
+
+    def get_genre(self, lyrics_id: int) -> str:
+        return self.ds_data.iloc[lyrics_id]['tag']
+
+    def get_pretrained_embedder(self) -> torch.nn.Embedding:
+        return self.embedder.embeddings
+
+    def get_posttrained_embedder(self) -> torch.nn.Embedding:
+        return self.language_model.embedding
+
+    def get_language_model(self) -> torch.nn.Module:
+        return self.language_model
+
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
         text = text.replace('\r\n', '\n')  # CRLF To LF
@@ -177,7 +192,7 @@ class Midnight(Solution):
 
     def pollute_text(self, text: str) -> str:
         text = text.replace(' <NEW_LINE> ', '\n')
-        text = re.sub(r" <[\w ']+>", "", text)
+        text = re.sub(r"<[\w ']+> ?", "", text)
         return text
 
     def _get_top_k_words(self, row, k=5):
@@ -215,7 +230,7 @@ class Midnight(Solution):
                   genre: str, context_words: list[str],
                   starting_words="",
                   starting_token="<SONG_START>", end_token="<SONG_END>",
-                  max_len=40, temperature=1.0, top_k=50,
+                  max_len=200, temperature=1.0, top_k=50,
                   ):
         def ends_with(sequence, pattern):
             seq_len, pat_len = sequence.size(1), pattern.size(0)
