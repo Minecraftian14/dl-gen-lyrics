@@ -2,8 +2,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 
 @dataclass
@@ -26,6 +24,8 @@ Unknown = int | str | Annotation | Sample
 
 
 class Solution:
+
+    def get_data_size(self) -> int: ...
 
     def get_lyrics(self, lyrics_id: int) -> str:
         """
@@ -114,7 +114,7 @@ class Solution:
         :return:
         """
 
-    def get_context_words(self, text: Unknown, k=5) -> list[str]:
+    def get_context_words(self, data:Unknown, k=5):
         """
         Retrieve context words around the provided sequence of words.
         A nice idea would be to train a TFIDF and use it to extract the most relevant words.
@@ -152,6 +152,10 @@ class Solution:
         :return: A list of integer IDs representing the tokenized text data.
         """
 
+    def tokenize_genre(self, genre: str | list[str]) -> int | list[int]:
+        """
+        """
+
     def detokenize_ids(self, data: list[int]) -> str:
         """
         Detokenizes a list of token IDs into their corresponding string representations
@@ -184,6 +188,23 @@ class Solution:
 
         :param data: Text input or lyrics data to be embedded.
         :return: A NumPy array of embeddings corresponding to the tokenized input.
+        """
+
+    @torch.no_grad()
+    def get_logits(self,
+                   data: 'list[Sample] | list[tuple[str, str, str]]',
+                   ) -> torch.Tensor:
+        """
+        Generate logits for a given set of input samples or tuples, using a specified
+        language model. This method tokenizes the inputs, pads sequences for batch
+        processing, and computes the output logits.
+
+        :param data: Input data to process. Can be a list of `Sample` objects or a
+            list of tuples, where each tuple contains (genre, context_words, lyrics).
+        :type data: list[Sample] | list[tuple[str, str, str]]
+
+        :return: A numpy array of logits computed for the input samples.
+        :rtype: np.ndarray
         """
 
     @torch.no_grad()
@@ -220,133 +241,20 @@ class Solution:
                        _temperature_epsilon=1e-4,
                        ) -> list[str]:
         """
+        Performs bulk inference to generate song lyrics based on given genres, context words, and starting
+        words. This function supports batching and optional configuration to control the generation
+        processes such as temperature and top-k sampling.
+
+        :param genres: A string or list of strings, representing the genres of the songs to be generated. If a single string is provided, it will be broadcast across all songs.
+        :param context_words: A string or list of strings as context inputs for generating lyrics. If a single string is provided, it will be broadcast across all songs.
+        :param starting_words: A string or list of strings containing initial words to seed the generation process. Defaults to an empty string. A single string will be broadcast across all songs.
+        :param starting_token: A special token marking the start of a song. Defaults to "<SONG_START>".
+        :param end_token: A special token marking the end of a song. Defaults to "<SONG_END>".
+        :param max_len: The maximum number of tokens each generated song can contain. Defaults to 200.
+        :param n_songs: The total number of songs to generate. This parameter is automatically inferred based on the length of the provided lists for `genres`, `context_words`, or `starting_words`, if not explicitly set.
+        :param temperature: A float parameter that is used to control the diversity of the generated text. Higher values lead to more random outputs, while lower values make the output more deterministic. Defaults to 1.0.
+        :param top_k: Limits the sampling pool to the top-k tokens with the highest probabilities, for controlled and faster generation. Defaults to 50.
+        :param _temperature_epsilon: A threshold that is used to avoid numerical instability when the temperature value is extremely low. Defaults to 1e-4. This parameter is internal and should not be modified.
+        :return: A list of generated song lyrics as strings.
+        :rtype: list[str]
         """
-
-        # Data Sanity Checks
-
-        if n_songs is None:
-            if isinstance(genres, list): n_songs = len(genres)
-            elif isinstance(context_words, list): n_songs = len(context_words)
-            elif isinstance(starting_words, list): n_songs = len(starting_words)
-            else: raise ValueError("Please provide either a list of genres, a list of context words, a list of starting words, or n_songs.")
-
-        if isinstance(genres, str): genres = [genres] * n_songs
-        if isinstance(context_words, str): context_words = [context_words] * n_songs
-        if isinstance(starting_words, str): starting_words = [starting_words] * n_songs
-
-        assert len(genres) == len(context_words) == len(starting_words)
-
-        # Retrieving the language model
-
-        language_model = self.get_language_model()
-        device = next(language_model.parameters()).device
-        language_model.eval()
-
-        # Some helper methods
-
-        def pad_ragged(token_lists: list[list[int]], pad_val: int = 0):
-            """Right-pad a list of token lists into a (B, L) tensor."""
-            max_token_length = max(map(len, token_lists))
-            padded = torch.full((len(token_lists), max_token_length), pad_val, dtype=torch.long, device=device)
-            lengths = torch.zeros(len(token_lists), dtype=torch.long)
-            for i, t in enumerate(token_lists):
-                padded[i, :len(t)] = torch.tensor(t, dtype=torch.long, device=device)
-                lengths[i] = len(t)
-            return padded, lengths
-
-        def sample_batch(logits: torch.Tensor) -> torch.Tensor:
-            """
-            Sample one next token per row.  Returns shape (B, 1).
-
-            Temperature fix: below TEMP_EPS we fall back to argmax (greedy),
-            which avoids the softmax overflow that crashes the GPU at tiny temps.
-            The top-k mask uses scatter so it never materializes a huge intermediate.
-            """
-            if temperature < _temperature_epsilon:
-                return logits.argmax(dim=-1, keepdim=True)  # (B, 1)
-            scaled = logits / temperature
-
-            # Top-k: zero out everything outside the k best positions
-            k = min(top_k, scaled.size(-1))
-            top_k_vals, top_k_idx = torch.topk(scaled, k, dim=-1)  # (B, k)
-            # Build an -inf mask and scatter the top-k values back in
-            filtered = torch.full_like(scaled, float('-inf'))
-            filtered.scatter_(1, top_k_idx, top_k_vals)  # (B, V)
-
-            probs = F.softmax(filtered, dim=-1)
-            return torch.multinomial(probs, num_samples=1)  # (B, 1)
-
-        # Tokenizing the inputs
-
-        genre_ids = torch.tensor([self.genre_to_id[g] for g in genres],
-                                 dtype=torch.long, device=device)  # (B,)
-        ctx_token_lists = [self.tokenize_text(c) for c in context_words]
-        ctx_padded, _ = pad_ragged(ctx_token_lists)  # (B, C)
-
-        prefix_token_lists = [self.tokenize_text(starting_token + sw) for sw in starting_words]
-        prefix_padded, pfx_lengths = pad_ragged(prefix_token_lists)  # (B, P)
-
-        end_ids = torch.tensor(self.tokenize_text(end_token), dtype=torch.long, device=device)
-        end_len = end_ids.size(0)
-
-        # Initial steps
-
-        ctx_mask = (ctx_padded != 0).unsqueeze(-1).float()  # (B, C, 1)
-        ctx_emb = language_model.embedding(ctx_padded)  # (B, C, E)
-        ctx_vec = (ctx_emb * ctx_mask).sum(1) / ctx_mask.sum(1).clamp(min=1.0)  # (B, E)
-
-        genre_vec = language_model.genre_embedding(genre_ids)  # (B, G)
-        cond = torch.cat([ctx_vec, genre_vec], dim=-1)  # (B, E+G)
-
-        h0 = torch.tanh(language_model.condition_proj_h(cond))  # (B, H)
-        c0 = torch.tanh(language_model.condition_proj_c(cond))  # (B, H)
-
-        L = language_model.lstm.num_layers
-        hidden = (
-            h0.unsqueeze(0).expand(L, n_songs, -1).contiguous(),
-            c0.unsqueeze(0).expand(L, n_songs, -1).contiguous(),
-        )
-
-        # Hidden state update
-
-        prefix_emb = language_model.embedding(prefix_padded)  # (B, P, E)
-        packed_pfx = pack_padded_sequence(
-            prefix_emb, pfx_lengths.cpu(),
-            batch_first=True, enforce_sorted=False)
-        pfx_out_packed, hidden = language_model.lstm(packed_pfx, hidden)
-        pfx_out, _ = pad_packed_sequence(pfx_out_packed, batch_first=True)  # (B, P, H)
-
-        # Logits at the *last real* prefix token — this seeds the first generation step.
-        last_pfx_pos = (pfx_lengths - 1).clamp(min=0).to(device)  # (B,)
-        logits = language_model.output_layer(pfx_out[torch.arange(n_songs, device=device), last_pfx_pos])  # (B, V)
-
-        # Decoder
-
-        generated = prefix_padded.tolist()  # list[list[int]]
-        finished = torch.zeros(n_songs, dtype=torch.bool, device=device)
-
-        for _ in range(max_len):
-            if finished.all():
-                break
-
-            next_tokens = sample_batch(logits)  # (B, 1)
-            # Don't append anything meaningful for sequences that are already done.
-            next_tokens = next_tokens.masked_fill(finished.unsqueeze(1), 0)
-
-            for i in range(n_songs):
-                if not finished[i]:
-                    tok = next_tokens[i, 0].item()
-                    generated[i].append(tok)
-                    if (len(generated[i]) >= end_len and
-                            torch.equal(
-                                torch.tensor(generated[i][-end_len:], device=device),
-                                end_ids,
-                            )):
-                        finished[i] = True
-
-            # Single LSTM step with the carried hidden state
-            emb = language_model.embedding(next_tokens)  # (B, 1, E)
-            out, hidden = language_model.lstm(emb, hidden)  # (B, 1, H)
-            logits = language_model.output_layer(out[:, 0, :])  # (B, V)
-
-        return [self.pollute_text(self.detokenize_ids(seq)) for seq in generated]

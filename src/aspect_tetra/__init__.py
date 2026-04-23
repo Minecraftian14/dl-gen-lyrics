@@ -1,6 +1,7 @@
 from .dataset.lyrics_dataset import LyricsDataset, build_dataloaders, save_token_sequences, load_token_sequences
 from .dataset.lyrics_dataset import collate_fn as tetra_collate_fn
 from .evaluation.evaluator import compute_bertscore, compute_mauve, compute_perplexity, compute_self_bleu, Evaluator
+from .evaluation.evaluator_adaptor_for_core_solution import Evaluator as SolutionEvaluator
 from .inference.generator import LyricsGenerator
 from .model.bigru import BiGRULyricsModel
 from .preprocessing.tokenizer import LyricsTokenizer
