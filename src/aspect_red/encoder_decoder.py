@@ -55,8 +55,8 @@ class EncoderDecoderLSTM(nn.Module):
             train_dataloader=self.dataloader,
             criterion=nn.CrossEntropyLoss(ignore_index=0),
             optimizer=self._optimizer,
-            epochs=1,
-            device='cpu',
+            epochs=15,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
             record_per_batch_training_loss=True,
         )
 
