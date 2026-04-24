@@ -49,29 +49,38 @@ class Evaluator:
 
         return np.mean(scores)
 
+    def default_collate(self, genres, contexts, lyrics):
+        return lyrics
+    
+    def default_zip_collate(self, genres, contexts, lyrics):
+        return [f"genre {g} {c} {l}" for g, c, l in zip(genres, contexts, lyrics)]    
+        
     @torch.no_grad()
-    def compute_perplexity(self, n_sample=100, batch_size=10):
+    def compute_perplexity(self, n_sample=100, batch_size=10, collate=None):
+        if collate is None: collate = default_collate
+            
         solution = self.solution
         indices = np.random.randint(0, solution.get_data_size(), n_sample)
-
+    
         scores = []
         for i in range(0, n_sample, batch_size):
             indices_batch = indices[i:i + batch_size]
             lyrics = list(map(solution.get_lyrics, indices_batch))
             genres = list(map(solution.get_genre, indices_batch))
             context_words = list(map(" ".join, map(solution.get_context_words, lyrics)))
-
+    
             logits = solution.get_logits(list(zip(genres, context_words, lyrics)))
             logits = logits.detach()[:, :-1, :].reshape(-1, logits.shape[-1])
-
+    
+            lyrics = collate(genres, context_words, lyrics)
             lyrics = solution.tokenize_text(lyrics)
             lyrics = pad_lists(lyrics, fill_value=0)
             lyrics = torch.tensor(lyrics, device=self.device)
             lyrics = lyrics[:, 1:].reshape(-1)
-
+    
             criterion = nn.CrossEntropyLoss(ignore_index=0, reduction="mean")
             scores.append(torch.exp(criterion(logits, lyrics)).detach().cpu().item())
-
+    
         return np.mean(scores)
 
     def compute_self_bleu(self, n_sample=100, batch_size=10):
