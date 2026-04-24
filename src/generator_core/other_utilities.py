@@ -80,3 +80,8 @@ def cached(key='cached', root='temp', saver: Callable[[any, str], None] = None, 
         return wrapper
 
     return decorator
+
+
+def pad_lists(lst, fill_value=0):
+    max_len = max(len(x) for x in lst)
+    return [x + [fill_value] * (max_len - len(x)) for x in lst]

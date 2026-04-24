@@ -1,9 +1,11 @@
 import torch.nn.functional as F
+from torch import optim
 from torch.utils import data
 
 from aspect_midnight import Midnight
+from aspect_tetra import BiGRULyricsModel, tetra_collate_fn, LyricsDataset
+from dl_trainer import Trainer
 from generator_core import *
-from .model.bigru import BiGRULyricsModel
 
 sure_fire_keywords = [
     "chorus", "verse", "stanza", "interlude",
@@ -21,23 +23,6 @@ structure_tokens = [
     "[", "]", "(", ")", "<", ">", "{", "}",
     ":",
 ]
-
-
-class CobaltDataset(data.Dataset):
-    def __init__(self, cobalt: 'Cobalt'):
-        self.cobalt = cobalt
-
-    def __len__(self):
-        return len(self.cobalt.ds_data)
-
-    def __getitem__(self, index):
-        cobalt = self.cobalt
-        sample = cobalt.ds_data.iloc[index]
-        genre = sample['genre']
-        context_words = sample['context_words']
-        starting_words = sample['starting_words']
-        ending_words = sample['ending_words']
-        return genre, context_words, starting_words, ending_words
 
 
 class Cobalt(Solution):
@@ -58,11 +43,8 @@ class Cobalt(Solution):
         self.feature_names = self.midnight.feature_names
         self.vocabulary = self.midnight.vocabulary
         self.embedder = self.midnight.embedder
+        self.training_data = self._prepare_training_data()
         self.language_model = self._prepare_language_model()
-
-    def _create_sequence(self, sample: Sample):
-        sequence = f"{sample.annotation.genre} {"".join(sample.annotation.keywords)} {sample.lyrics}"
-        return sequence
 
     @cached()
     def _prepare_training_data(self, ds_data=None):
@@ -70,11 +52,20 @@ class Cobalt(Solution):
         lyrics = ds_data['lyrics']
         genre = ds_data['tag'].map(lambda g: f"<genre_{g}>")
         context_words = ds_data['lyrics'].map(lambda l: " ".join([f"<theme_{t}>" for t in self.get_context_words(l)]))
-        return genre.str.cat([context_words, lyrics], sep=" ")
+        return genre.str.cat([context_words, lyrics], sep=" ").map(self.tokenize_text)
+
+    def _optimizer(self, parameters):
+        return optim.AdamW(parameters, lr=3e-4, weight_decay=1e-5)
+
+    def _model_train_step(self, model, data): return model(data)
+
+    def _model_criteria_step(self, criterion, preds, truth):
+        preds = preds[0].permute(0, 2, 1)
+        return criterion(preds, truth)
 
     @cached()
     def _prepare_language_model(self):
-        return BiGRULyricsModel(
+        model = BiGRULyricsModel(
             vocab_size=self.vocabulary.vocab_size(),
             embed_dim=512,
             hidden_dim=512,
@@ -84,6 +75,24 @@ class Cobalt(Solution):
             word2vec_weights=self.embedder.embeddings.weight,
             word2vec_frozen=True,
         )
+        dataloader = data.DataLoader(
+            LyricsDataset(self.training_data),
+            batch_size=64,
+            shuffle=True,
+            collate_fn=tetra_collate_fn,
+        )
+        model.trainer = Trainer(
+            model=model,
+            train_dataloader=dataloader,
+            criterion=nn.CrossEntropyLoss(ignore_index=0, label_smoothing=0.1),
+            optimizer=self._optimizer,
+            epochs=1,
+            device='cpu',
+            record_per_batch_training_loss=True,
+            model_train_step=self._model_train_step,
+            model_criteria_step=self._model_criteria_step,
+        )
+        return model
 
     def clean_text(self, text: str) -> str:
         return self.midnight.clean_text(text)
@@ -128,20 +137,22 @@ class Cobalt(Solution):
 
         starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
-        genre_id = self.tokenize_text(genre)
-        context_ids = self.tokenize_text(" ".join(context_words))
+        genre_id = self.tokenize_text(f"<genre_{genre}>")
+        context_ids = self.tokenize_text(" ".join([f"<theme_{t}>" for t in context_words]))
         annotation_ids = genre_id + context_ids
+
+        starting_ids = annotation_ids + starting_ids
 
         device = next(self.language_model.parameters()).device
         input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
         ending_ids = torch.tensor(ending_ids, device=device)
-        annotation_ids = torch.tensor([annotation_ids], device=device)
 
         self.language_model.eval()
         for _ in range(max_len):
-            preds = self.language_model(annotation_ids, input_ids)
+            preds, _ = self.language_model(input_ids)
+            preds = preds[0, -1]
             preds = preds / temperature
-            next_token = sample_top_k(preds.squeeze(0), k=top_k)
+            next_token = sample_top_k(preds, k=top_k)
 
             input_ids = torch.cat([input_ids, next_token.view(1, 1)], dim=1)
             if ends_with(input_ids, ending_ids): break
