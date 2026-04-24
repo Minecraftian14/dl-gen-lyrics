@@ -39,8 +39,6 @@ class Teal(Solution):
         self.genre_to_id = dict()
 
         self.ds_data = self._prepare_ds_data(ds_data)
-        # for g in self.ds_data['tag'].unique():
-        #     self.custom_tokens.add(f"<GENRE_{g.upper()}>")
         self.custom_tokens = self._get_custom_tokens()
         self.custom_tokens.add('<NEW_LINE>')
         self.genre_to_id = self._get_genre_dict()
@@ -132,12 +130,9 @@ class Teal(Solution):
         config = {
             "d_model": 512,
             "n_heads": 4,
-            "n_layers": 4,
-            "ffn": "gelu",
-            "norm": "layernorm",
-            "attn": "gqa",
             "n_groups": 2,
-            "pe": "sinusoidal",
+            "n_layers": 4
+            
         }
     
         model = TransformerModel(
@@ -161,7 +156,7 @@ class Teal(Solution):
             criterion=torch.nn.CrossEntropyLoss(ignore_index=0),
             model_train_step=self.model_train_step,
             model_criteria_step=self.model_criteria_step,
-            epochs=1,
+            epochs=20,
             device='cuda',
             record_per_batch_training_loss=True,
             checkpoint_frequency_batch=10,
@@ -255,24 +250,47 @@ class Teal(Solution):
                   genre: str, context_words: list[str],
                   starting_words="",
                   starting_token="<SONG_START>", end_token="<SONG_END>",
-                  max_len=40, temperature=1.0, top_k=50,
+                  max_len=40, temperature=1, top_k=50, top_p=0.9, penalty=1.2,
                   ):
         def ends_with(sequence, pattern):
             seq_len, pat_len = sequence.size(1), pattern.size(0)
             if seq_len < pat_len: return False
             return torch.equal(sequence[0, seq_len - pat_len:], pattern)
 
-        def sample_top_k(logits, k=50):
-            k = min(k, logits.size(-1))
-            top_k_logits, top_k_indices = torch.topk(logits, k)
-            probs = F.softmax(top_k_logits, dim=-1)
-            sampled_idx = torch.multinomial(probs, num_samples=1)
-            return top_k_indices[sampled_idx]
+        def sample_top_k_top_p(logits, prev_tokens, top_k=50, top_p=0.9, temperature=0.9, penalty=1.2):
+            logits = logits / temperature
+        
+            for token in set(prev_tokens):
+                logits[token] /= penalty
+        
+            probs = F.softmax(logits, dim=-1)
+        
+            # top-k
+            if top_k is not None:
+                top_k = min(top_k, probs.size(-1))
+                probs_topk, indices_topk = torch.topk(probs, top_k)
+            else:
+                probs_topk, indices_topk = probs, torch.arange(len(probs), device=probs.device)
+        
+            # sort
+            sorted_probs, sorted_indices = torch.sort(probs_topk, descending=True)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+        
+            # top-p cutoff
+            cutoff = cumulative_probs > top_p
+            cutoff[..., 1:] = cutoff[..., :-1].clone()
+            cutoff[..., 0] = False
+        
+            sorted_probs[cutoff] = 0
+            sorted_probs /= sorted_probs.sum()
+        
+            sampled_idx = torch.multinomial(sorted_probs, 1)
+            return indices_topk[sorted_indices[sampled_idx]]
 
-        genre_token = f"<GENRE_{genre.upper()}>"
+        genre_token = f"genre {genre}"
         cond_text = genre_token + " " + " ".join(context_words)
 
-        starting_ids = self.tokenize_text(cond_text + " " + starting_token + starting_words)
+        starting_ids = self.tokenize_text(cond_text + " " + starting_token + " " +starting_words)
         # starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
         # genre_id = self.genre_to_id[genre]
@@ -289,14 +307,33 @@ class Teal(Solution):
             # lengths = torch.tensor([input_ids.size(1)], device=device)
 
             preds = self.language_model(input_ids)
-            preds = preds[:, -1, :] / temperature
-            next_token = sample_top_k(preds.squeeze(0), k=top_k)
+            preds = preds[:, -1, :]
+            logits = preds.squeeze(0)
+            prev_tokens = input_ids.squeeze(0).tolist()
+            
+            next_token = sample_top_k_top_p(
+                logits,
+                prev_tokens,
+                top_p=top_p,
+                top_k=top_k,
+                temperature=temperature,
+                penalty=penalty
+            )
 
             input_ids = torch.cat([input_ids, next_token.view(1, 1)], dim=1)
             if ends_with(input_ids, ending_ids): break
 
         input_ids = input_ids.squeeze(0).tolist()
-        return self.detokenize_ids(input_ids)
+        output_text = self.detokenize_ids(input_ids)
+
+        # Find start token
+        start_idx = output_text.find(starting_token)
+        
+        if start_idx != -1:
+            output_text = output_text[start_idx:]
+        
+        return output_text
+        # return self.detokenize_ids(input_ids)
 
     def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
         # We are not using annotations, therefore, we return the embeds as is.
