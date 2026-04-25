@@ -92,8 +92,8 @@ class BiGRULyricsModel(nn.Module):
         self.num_layers  = num_layers
         self.dropout_p   = dropout
         self.pad_id      = pad_id
-        self.bidirectional = True
-        self.num_directions = 2  # BiGRU
+        self.bidirectional = False
+        self.num_directions = 1  # Unidirectional GRU
 
         # ── Embedding ──────────────────────────────────────────────────
         if word2vec_weights is not None:
@@ -107,18 +107,18 @@ class BiGRULyricsModel(nn.Module):
             nn.init.uniform_(self.embedding.weight, -0.1, 0.1)
         self.embed_drop = nn.Dropout(dropout)
 
-        # ── BiGRU Stack ────────────────────────────────────────────────
+        # ── GRU Stack ────────────────────────────────────────────────
         self.gru = nn.GRU(
             input_size=embed_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=True,
+            bidirectional=False,
         )
 
         # ── Post-GRU projection ────────────────────────────────────────
-        # Concatenated forward + backward → hidden_dim
+        # Forward only → hidden_dim
         self.layer_norm  = nn.LayerNorm(hidden_dim * self.num_directions)
         self.proj        = nn.Linear(hidden_dim * self.num_directions, hidden_dim)
         self.proj_drop   = nn.Dropout(dropout)
@@ -170,11 +170,11 @@ class BiGRULyricsModel(nn.Module):
         x = self.embedding(input_ids)        # (B, T, E)
         x = self.embed_drop(x)
 
-        # BiGRU
-        gru_out, hidden = self.gru(x, hidden)   # (B, T, 2H), (2*L, B, H)
+        # GRU
+        gru_out, hidden = self.gru(x, hidden)   # (B, T, H), (L, B, H)
 
         # LayerNorm + projection
-        out = self.layer_norm(gru_out)           # (B, T, 2H)
+        out = self.layer_norm(gru_out)           # (B, T, H)
         out = F.relu(self.proj(out))             # (B, T, H)
         out = self.proj_drop(out)
 
@@ -196,51 +196,16 @@ class BiGRULyricsModel(nn.Module):
     def forward_hidden(self, hidden: torch.Tensor) -> torch.Tensor:
         """
         Extract only the *forward* direction hidden states.
-        Used during auto-regressive inference to seed the next step.
-
-        BiGRU hidden layout (num_layers * 2, batch, H):
-          Layer 0 fwd → index 0
-          Layer 0 bwd → index 1
-          Layer 1 fwd → index 2
-          Layer 1 bwd → index 3
-          …
+        For a unidirectional GRU, this just returns the hidden state as-is.
         """
-        fwd_indices = list(range(0, self.num_layers * 2, 2))
-        return hidden[fwd_indices]  # (num_layers, B, H)
+        return hidden
 
     # ──────────────────────────────────────────────────────────────────
     def forward_only_gru(self) -> nn.GRU:
         """
-        Return a *unidirectional* GRU constructed from the forward weights
-        of the trained BiGRU. Used internally for inference.
+        Return the GRU directly, since it is already unidirectional.
         """
-        fwd_gru = nn.GRU(
-            input_size=self.embed_dim,
-            hidden_size=self.hidden_dim,
-            num_layers=self.num_layers,
-            batch_first=True,
-            dropout=0.0,
-            bidirectional=False,
-        )
-        with torch.no_grad():
-            for layer in range(self.num_layers):
-                # Copy forward weights from the BiGRU
-                fwd_gru.weight_ih_l0 if layer == 0 else None
-                src_ih  = getattr(self.gru, f"weight_ih_l{layer}")
-                src_hh  = getattr(self.gru, f"weight_hh_l{layer}")
-                src_bih = getattr(self.gru, f"bias_ih_l{layer}")
-                src_bhh = getattr(self.gru, f"bias_hh_l{layer}")
-
-                dst_ih  = getattr(fwd_gru, f"weight_ih_l{layer}")
-                dst_hh  = getattr(fwd_gru, f"weight_hh_l{layer}")
-                dst_bih = getattr(fwd_gru, f"bias_ih_l{layer}")
-                dst_bhh = getattr(fwd_gru, f"bias_hh_l{layer}")
-
-                dst_ih.copy_(src_ih)
-                dst_hh.copy_(src_hh)
-                dst_bih.copy_(src_bih)
-                dst_bhh.copy_(src_bhh)
-        return fwd_gru
+        return self.gru
 
     # ──────────────────────────────────────────────────────────────────
     def count_parameters(self) -> int:

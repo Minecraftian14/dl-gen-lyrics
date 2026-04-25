@@ -61,16 +61,25 @@ class Evaluator:
             genres = list(map(solution.get_genre, indices_batch))
             context_words = list(map(" ".join, map(solution.get_context_words, lyrics)))
 
+            # 1. Get Logits for the full sequence [Genre + Context + Lyrics]
             logits = solution.get_logits(list(zip(genres, context_words, lyrics)))
             logits = logits.detach()[:, :-1, :].reshape(-1, logits.shape[-1])
 
-            lyrics = solution.tokenize_text(lyrics)
-            lyrics = pad_lists(lyrics, fill_value=0)
-            lyrics = torch.tensor(lyrics, device=self.device)
-            lyrics = lyrics[:, 1:].reshape(-1)
+            # 2. Build the matching target tokens identical to what get_logits sees
+            target_sequences = []
+            for g, ctx, l in zip(genres, context_words, lyrics):
+                g_ids = solution.tokenize_text(f"<genre_{g}>")
+                c_ids = solution.tokenize_text(" ".join([f"<theme_{t}>" for t in ctx.split()]))
+                l_ids = solution.tokenize_text(l)
+                target_sequences.append(g_ids + c_ids + l_ids)
+
+            # 3. Pad targets to match the logit batch shape
+            targets = pad_lists(target_sequences, fill_value=0)
+            targets = torch.tensor(targets, device=self.device)
+            targets = targets[:, 1:].reshape(-1)
 
             criterion = nn.CrossEntropyLoss(ignore_index=0, reduction="mean")
-            scores.append(torch.exp(criterion(logits, lyrics)).detach().cpu().item())
+            scores.append(torch.exp(criterion(logits, targets)).detach().cpu().item())
 
         return np.mean(scores)
 

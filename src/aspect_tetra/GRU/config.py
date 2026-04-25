@@ -67,16 +67,16 @@ SP_CHARACTER_COVERAGE = 0.9995
 # Model Architecture
 # ─────────────────────────────────────────────
 EMBEDDING_DIM      = 256
-HIDDEN_DIM         = 512           # per direction; total = 1024
+HIDDEN_DIM         = 512           # per direction; total = 512
 NUM_LAYERS         = 2
 DROPOUT            = 0.3
-BIDIRECTIONAL      = True
+BIDIRECTIONAL      = False
 
 # ─────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────
 BATCH_SIZE         = 64
-SEQ_LEN            = 128           # tokens per training window
+SEQ_LEN            = 1024           # tokens per training window
 EPOCHS             = 30
 LEARNING_RATE      = 3e-4
 WEIGHT_DECAY       = 1e-5
