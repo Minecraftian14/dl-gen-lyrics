@@ -57,8 +57,6 @@ class Evaluator:
         
     @torch.no_grad()
     def compute_perplexity(self, n_sample=100, batch_size=10, collate=None):
-        if collate is None: collate = default_collate
-            
         solution = self.solution
         indices = np.random.randint(0, solution.get_data_size(), n_sample)
     
@@ -72,14 +70,23 @@ class Evaluator:
             logits = solution.get_logits(list(zip(genres, context_words, lyrics)))
             logits = logits.detach()[:, :-1, :].reshape(-1, logits.shape[-1])
     
-            lyrics = collate(genres, context_words, lyrics)
-            lyrics = solution.tokenize_text(lyrics)
-            lyrics = pad_lists(lyrics, fill_value=0)
-            lyrics = torch.tensor(lyrics, device=self.device)
-            lyrics = lyrics[:, 1:].reshape(-1)
+            if collate is not None:
+                lyrics_texts = collate(genres, context_words, lyrics)
+                target_sequences = [solution.tokenize_text(txt) for txt in lyrics_texts]
+            else:
+                target_sequences = []
+                for g, ctx, l in zip(genres, context_words, lyrics):
+                    g_ids = solution.tokenize_text(f"<genre_{g}>")
+                    c_ids = solution.tokenize_text(" ".join([f"<theme_{t}>" for t in ctx.split()]))
+                    l_ids = solution.tokenize_text(l)
+                    target_sequences.append(g_ids + c_ids + l_ids)
+            
+            targets = pad_lists(target_sequences, fill_value=0)
+            targets = torch.tensor(targets, device=self.device)
+            targets = targets[:, 1:].reshape(-1)
     
             criterion = nn.CrossEntropyLoss(ignore_index=0, reduction="mean")
-            scores.append(torch.exp(criterion(logits, lyrics)).detach().cpu().item())
+            scores.append(torch.exp(criterion(logits, targets)).detach().cpu().item())
     
         return np.mean(scores)
 
