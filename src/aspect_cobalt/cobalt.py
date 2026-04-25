@@ -185,8 +185,8 @@ class Cobalt(Solution):
                     temperature=temperature
                 )
                 
-                # Try to format the tokens nicely into a string
-                song_text = self.pollute_text(" ".join(tokens))
+                # Format the generated string back to normal human text
+                song_text = self.pollute_text(tokens)
                 
                 # Write to the evaluation file
                 f.write(f"--- Song {i+1} ---\n")
