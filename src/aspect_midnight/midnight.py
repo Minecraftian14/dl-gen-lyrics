@@ -371,7 +371,7 @@ class Midnight(Solution):
         starting_ids = self.tokenize_text(starting_words)
         genre_id = [self.genre_to_id[g] for g in genres]
         context_ids = self.tokenize_text(context_words)
-        starting_ids, genre_id, context_ids = pad_lists(starting_ids), pad_lists(genre_id), pad_lists(context_ids)
+        starting_ids, context_ids = pad_lists(starting_ids), pad_lists(context_ids)
 
         # TODO: YOU FORGOT TO PAD THE SEQUENCES, they are not guaranteed to be the same length after tokenization
         input_ids = torch.tensor(starting_ids, device=device)
