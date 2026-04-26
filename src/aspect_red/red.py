@@ -194,5 +194,5 @@ class Red(Solution):
 
         input_ids = input_ids.cpu().tolist()
         generated_songs = self.detokenize_ids(input_ids)
-        generated_songs = [(song if end_token not in song else song.split(end_token, 1)[0]) for song in generated_songs]
+        # generated_songs = [(song if end_token not in song else song.split(end_token, 1)[0]) for song in generated_songs]
         return list(map(self.pollute_text, generated_songs))
