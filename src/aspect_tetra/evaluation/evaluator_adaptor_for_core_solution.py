@@ -57,11 +57,12 @@ class Evaluator:
         
     @torch.no_grad()
     def compute_perplexity(self, n_sample=100, batch_size=10, collate=None):
-        if collate is None: collate = default_collate
+        if collate is None: collate = self.default_collate
             
         solution = self.solution
         indices = np.random.randint(0, solution.get_data_size(), n_sample)
-    
+        criterion = nn.CrossEntropyLoss(ignore_index=0)
+
         scores = []
         for i in range(0, n_sample, batch_size):
             indices_batch = indices[i:i + batch_size]
@@ -77,8 +78,7 @@ class Evaluator:
             lyrics = pad_lists(lyrics, fill_value=0)
             lyrics = torch.tensor(lyrics, device=self.device)
             lyrics = lyrics[:, 1:].reshape(-1)
-    
-            criterion = nn.CrossEntropyLoss(ignore_index=0, reduction="mean")
+
             scores.append(torch.exp(criterion(logits, lyrics)).detach().cpu().item())
     
         return np.mean(scores)

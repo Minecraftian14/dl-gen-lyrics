@@ -29,16 +29,18 @@ class EncoderDecoderLSTM(nn.Module):
         self.decoder_lstm = nn.LSTM(embed_dim, hidden_dim, num_layers=num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_dim, vocab_size)
 
-    def forward(self, annotations_x, decoder_x):
+    def forward(self, annotations_x, decoder_x, get_outputs=False):
         enc_embedded = self.embedding(annotations_x)
         _, (hidden, cell) = self.encoder_lstm(enc_embedded)
-        
+
         dec_embedded = self.embedding(decoder_x)
         outputs, _ = self.decoder_lstm(dec_embedded, (hidden, cell))
-        
-        last_hidden = outputs[:, -1, :] 
+
+        if get_outputs: return self.fc(outputs)
+
+        last_hidden = outputs[:, -1, :]
         logits = self.fc(last_hidden)
-        
+
         return logits
 
     def _optimizer(self, parameters):
@@ -108,7 +110,7 @@ class SlidingWindowDataset(IterableDataset):
             encoded_ann.extend(encoded_ctx)
 
             if len(encoded_song) <= self.seq_len: continue
-            
+
             for i in range(len(encoded_song) - self.seq_len):
                 window_x = encoded_song[i : i + self.seq_len]
                 target_y = encoded_song[i + self.seq_len]
@@ -130,11 +132,8 @@ class SlidingWindowDatasetTruncated(IterableDataset):
         iterator = enumerate(dataset) if self.limit is None else zip(range(self.limit), dataset)
 
         for _, sample in iterator:
-            encoded_ann = self.red.tokenize_text(sample.tag)
-            encoded_ctx = self.red.tokenize_text(" ".join(self.red.get_context_words(sample.lyrics)))
+            encoded_ann = self.red.tokenize_text(sample.tag + " "+ " ".join(self.red.get_context_words(sample.lyrics)))
             encoded_song = self.red.tokenize_text(sample.lyrics)
-
-            encoded_ann.extend(encoded_ctx)
 
             if len(encoded_song) <= self.seq_len: continue
 
@@ -150,11 +149,11 @@ class SlidingWindowDatasetTruncated(IterableDataset):
 
 def collate_seq2seq(batch):
     anns, windows_x, ys = zip(*batch)
-    
+
     max_ann_len = max(len(a) for a in anns)
     padded_anns = torch.zeros(len(anns), max_ann_len, dtype=torch.long)
     for i, a in enumerate(anns): padded_anns[i, :len(a)] = a
-        
+
     windows_x = torch.stack(windows_x)
     ys = torch.stack(ys)
 

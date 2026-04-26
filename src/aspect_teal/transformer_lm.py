@@ -59,7 +59,7 @@ class TransformerDataset(data.Dataset):
         
         
 class SinusoidalPE(nn.Module):
-    def __init__(self, d_model, max_len=3000):
+    def __init__(self, d_model, max_len=5000):
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         pos = torch.arange(0, max_len).unsqueeze(1)
@@ -82,7 +82,7 @@ class GQAAttention(nn.Module):
 
         self.register_buffer(
             "causal_mask",
-            torch.triu(torch.ones(3000, 3000), diagonal=1).bool()
+            torch.triu(torch.ones(5000, 5000), diagonal=1).bool()
         )
 
         self.n_heads = n_heads

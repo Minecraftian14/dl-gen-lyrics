@@ -55,6 +55,7 @@ def key_cached(key, data_supplier,
         return _read_object(os.path.join(root, f"{key}.{_bone_to_ext[bone]}"), bone)
 
     else:
+        print("Creating Cache for", key)
         if saver is not None:
             with open(bone_file, 'w') as f: f.write("custom")
             return saver(data_supplier(), os.path.join(root, key))

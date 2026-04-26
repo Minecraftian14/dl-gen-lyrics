@@ -1,7 +1,6 @@
 import sentencepiece as spm
 import torch.nn.functional as F
 from sklearn.feature_extraction.text import TfidfVectorizer
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from generator_core import *
 from .conditional_lstm_lm import ConditionalLSTMLM, ConditionalDataset
@@ -339,15 +338,9 @@ class Midnight(Solution):
 
         # Some helper methods
 
-        def pad_ragged(token_lists: list[list[int]], pad_val: int = 0):
-            """Right-pad a list of token lists into a (B, L) tensor."""
-            max_token_length = max(map(len, token_lists))
-            padded = torch.full((len(token_lists), max_token_length), pad_val, dtype=torch.long, device=device)
-            lengths = torch.zeros(len(token_lists), dtype=torch.long)
-            for i, t in enumerate(token_lists):
-                padded[i, :len(t)] = torch.tensor(t, dtype=torch.long, device=device)
-                lengths[i] = len(t)
-            return padded, lengths
+        def make_rectangular(x):
+            max_len = max(map(len, x))
+            return [y + [0] * (max_len - len(y)) for y in x]
 
         def sample_batch(logits: torch.Tensor) -> torch.Tensor:
             """
@@ -371,77 +364,29 @@ class Midnight(Solution):
             probs = F.softmax(filtered, dim=-1)
             return torch.multinomial(probs, num_samples=1)  # (B, 1)
 
-        # Tokenizing the inputs
+        # A new title
 
-        genre_ids = torch.tensor([self.genre_to_id[g] for g in genres],
-                                 dtype=torch.long, device=device)  # (B,)
-        ctx_token_lists = [self.tokenize_text(c) for c in context_words]
-        ctx_padded, _ = pad_ragged(ctx_token_lists)  # (B, C)
+        starting_words = [(starting_token if s == '' else starting_token + " " + s) for s in starting_words]
 
-        prefix_token_lists = [self.tokenize_text(starting_token + sw) for sw in starting_words]
-        prefix_padded, pfx_lengths = pad_ragged(prefix_token_lists)  # (B, P)
+        starting_ids = self.tokenize_text(starting_words)
+        genre_id = [self.genre_to_id[g] for g in genres]
+        context_ids = self.tokenize_text(context_words)
+        starting_ids, genre_id, context_ids = pad_lists(starting_ids), pad_lists(genre_id), pad_lists(context_ids)
 
-        end_ids = torch.tensor(self.tokenize_text(end_token), dtype=torch.long, device=device)
-        end_len = end_ids.size(0)
-
-        # Initial steps
-
-        ctx_mask = (ctx_padded != 0).unsqueeze(-1).float()  # (B, C, 1)
-        ctx_emb = language_model.embedding(ctx_padded)  # (B, C, E)
-        ctx_vec = (ctx_emb * ctx_mask).sum(1) / ctx_mask.sum(1).clamp(min=1.0)  # (B, E)
-
-        genre_vec = language_model.genre_embedding(genre_ids)  # (B, G)
-        cond = torch.cat([ctx_vec, genre_vec], dim=-1)  # (B, E+G)
-
-        h0 = torch.tanh(language_model.condition_proj_h(cond))  # (B, H)
-        c0 = torch.tanh(language_model.condition_proj_c(cond))  # (B, H)
-
-        L = language_model.lstm.num_layers
-        hidden = (
-            h0.unsqueeze(0).expand(L, n_songs, -1).contiguous(),
-            c0.unsqueeze(0).expand(L, n_songs, -1).contiguous(),
-        )
-
-        # Hidden state update
-
-        prefix_emb = language_model.embedding(prefix_padded)  # (B, P, E)
-        packed_pfx = pack_padded_sequence(
-            prefix_emb, pfx_lengths.cpu(),
-            batch_first=True, enforce_sorted=False)
-        pfx_out_packed, hidden = language_model.lstm(packed_pfx, hidden)
-        pfx_out, _ = pad_packed_sequence(pfx_out_packed, batch_first=True)  # (B, P, H)
-
-        # Logits at the *last real* prefix token — this seeds the first generation step.
-        last_pfx_pos = (pfx_lengths - 1).clamp(min=0).to(device)  # (B,)
-        logits = language_model.output_layer(pfx_out[torch.arange(n_songs, device=device), last_pfx_pos])  # (B, V)
-
-        # Decoder
-
-        generated = prefix_padded.tolist()  # list[list[int]]
-        finished = torch.zeros(n_songs, dtype=torch.bool, device=device)
+        # TODO: YOU FORGOT TO PAD THE SEQUENCES, they are not guaranteed to be the same length after tokenization
+        input_ids = torch.tensor(starting_ids, device=device)
+        context_ids = torch.tensor(context_ids, device=device)
+        genre_id = torch.tensor(genre_id, device=device)
 
         for _ in range(max_len):
-            if finished.all():
-                break
+            lengths = torch.ones((input_ids.size(0)), dtype=torch.long, device=device) * input_ids.size(1)
 
-            next_tokens = sample_batch(logits)  # (B, 1)
-            # Don't append anything meaningful for sequences that are already done.
-            next_tokens = next_tokens.masked_fill(finished.unsqueeze(1), 0)
+            preds = self.language_model(input_ids, context_ids, lengths, genre_id)
+            next_token = sample_batch(preds[:, -1, :])
 
-            for i in range(n_songs):
-                if not finished[i]:
-                    tok = next_tokens[i, 0].item()
-                    generated[i].append(tok)
-                    if (len(generated[i]) >= end_len and
-                            torch.equal(
-                                torch.tensor(generated[i][-end_len:], device=device),
-                                end_ids,
-                            )):
-                        finished[i] = True
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
-            # Single LSTM step with the carried hidden state
-            emb = language_model.embedding(next_tokens)  # (B, 1, E)
-            out, hidden = language_model.lstm(emb, hidden)  # (B, 1, H)
-            logits = language_model.output_layer(out[:, 0, :])  # (B, V)
-
-        return [self.pollute_text(self.detokenize_ids(seq)) for seq in generated]
+        input_ids = input_ids.cpu().tolist()
+        generated_songs = self.detokenize_ids(input_ids)
+        generated_songs = [(song if end_token not in song else song.split(end_token, 1)[0]) for song in generated_songs]
+        return list(map(self.pollute_text, generated_songs))

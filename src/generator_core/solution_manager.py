@@ -114,7 +114,7 @@ class Solution:
         :return:
         """
 
-    def get_context_words(self, data:Unknown, k=5):
+    def get_context_words(self, data: Unknown, k=5):
         """
         Retrieve context words around the provided sequence of words.
         A nice idea would be to train a TFIDF and use it to extract the most relevant words.
@@ -229,6 +229,11 @@ class Solution:
         :param top_k: The number of top predictions to consider when sampling the next token. Defaults to 50.
         :return: A string containing the complete generated text sequence.
         """
+        return self.bulk_inference(
+            genres=genre, context_words=context_words, starting_words=starting_words,
+            starting_token=starting_token, end_token=end_token, max_len=max_len, n_songs=1,
+            temperature=temperature, top_k=top_k,
+        )[0]
 
     @torch.no_grad()
     def bulk_inference(self,

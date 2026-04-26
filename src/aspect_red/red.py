@@ -1,9 +1,9 @@
+import torch
 import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
 
 from aspect_midnight import Midnight
 from generator_core import *
-from .encoder_decoder import EncoderDecoderLSTM, SlidingWindowDataset, SlidingWindowDatasetTruncated
+from .encoder_decoder import EncoderDecoderLSTM, SlidingWindowDatasetTruncated
 
 sure_fire_keywords = [
     "chorus", "verse", "stanza", "interlude",
@@ -55,151 +55,144 @@ class Red(Solution):
         edm.prepare_train(SlidingWindowDatasetTruncated(self))
         return edm
 
+    def get_data_size(self) -> int:
+        return self.midnight.get_data_size()
+
+    def get_lyrics(self, lyrics_id: int) -> str:
+        return self.midnight.get_lyrics(lyrics_id)
+
+    def get_genre(self, lyrics_id: int) -> str:
+        return self.midnight.get_genre(lyrics_id)
+
+    def get_pretrained_embedder(self) -> torch.nn.Embedding:
+        return self.embedder.embeddings
+
+    def get_posttrained_embedder(self) -> torch.nn.Embedding:
+        return self.language_model.embedding
+
+    def get_language_model(self) -> torch.nn.Module:
+        return self.language_model
+
     def clean_text(self, text: str) -> str:
-        text = text.strip().lower()  # To lower case
-        text = text.replace('\r\n', '\n')  # CRLF To LF
-        text = re.sub(r"[\"“”‘’]", ' " ', text)  # Remove quotes
-        text = re.sub(r"([\n.,!?;:\-])", r" \1 ", text)  # Add spaces around punctuations
-        text = re.sub(r" +", " ", text).strip()  # Remove extra spaces
-
-        text_items = []
-        for line in text.split('\n'):
-            line = line.strip()
-            if len(line) > 40:
-                text_items.append(line.strip())
-                continue
-            if len(line) == 0: continue
-
-            consume = False
-            for word in sure_fire_keywords:
-                if word in line and re.search(rf'\b{word}\b', line):
-                    token = f"<{word.upper()}>"
-                    text_items.append(token)
-                    if re.match(rf'^{word}\s*:.+', line):
-                        text_items.append(line.split(":", 2)[1].strip())
-                    self.custom_tokens.add(token)
-                    consume = True
-                    break
-
-            if not consume:
-                for word in two_fire_keywords:
-                    if word in line and re.search(rf'\b{word}\b', line):
-                        if any([token in line for token in structure_tokens]):
-                            token = f"<{word.upper()}>"
-                            text_items.append(token)
-                            self.custom_tokens.add(token)
-                            consume = True
-                            break
-
-            if not consume:
-                text_items.append(line.strip())
-
-        text = " <NEW_LINE> ".join(text_items)
-        text = re.sub(r"([^\w<>'])", r" \1 ", text)
-        text = re.sub(r"\s+", " ", text)
-        text = '<SONG_START> ' + text + ' <SONG_END>'
-        self.custom_tokens.update({'<SONG_START>', '<SONG_END>'})
-        return text
+        return self.midnight.clean_text(text)
 
     def pollute_text(self, text: str) -> str:
-        text = text.replace(' <NEW_LINE> ', '\n')
-        text = re.sub(r" <[\w ']+>", "", text)
-        return text
-
-    def _get_top_k_words(self, row, k=5):
-        row_data = row.toarray().flatten()
-        top_indices = np.argsort(row_data)[-k:]
-        return [self.feature_names[i] for i in top_indices if row_data[i] > 0]
+        return self.midnight.pollute_text(text)
 
     def get_context_words(self, text, k=5):
-        return self._get_top_k_words(self.tfidf.transform([text]), k=k)
+        return self.midnight.get_context_words(text, k)
 
     def annotate_text(self, id: int, k=5) -> Annotation:
-        text = self.ds_data.iloc[id]['lyrics']
-        genre = self.ds_data.iloc[id]['tag']
-        context_words = self.get_context_words(text, k=k)
-        return Annotation(id, genre, context_words)
+        return self.midnight.annotate_text(id, k)
 
     def tokenize_text(self, data: str) -> list[int]:
-        if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
-        return self.vocabulary.encode_as_ids(data)
+        return self.midnight.tokenize_text(data)
+
+    def tokenize_genre(self, genre: str | list[str]) -> int | list[int]:
+        return self.midnight.tokenize_text(genre)
 
     def detokenize_ids(self, data: list[int]) -> list[str]:
-        return self.vocabulary.decode_ids(data)
+        return self.midnight.detokenize_ids(data)
 
-    @torch.no_grad()
     def embed_tokens(self, data):
-        if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
-        if isinstance(data, str): data = self.tokenize_text(data)
-        tokens = torch.tensor(data, dtype=torch.long)
-        self.embedder = self.embedder.trainer.to('cpu')
-        embeds = self.embedder.embeddings(tokens).numpy()
-        return embeds
+        return self.midnight.embed_tokens(data)
 
     @torch.no_grad()
-    def inference(self,
-                  genre: str, context_words: list[str],
-                  starting_words="",
-                  starting_token="<SONG_START>", end_token="<SONG_END>",
-                  max_len=40, temperature=1.0, top_k=50,
-                  ):
-        def ends_with(sequence, pattern):
-            seq_len, pat_len = sequence.size(1), pattern.size(0)
-            if seq_len < pat_len: return False
-            return torch.equal(sequence[0, seq_len - pat_len:], pattern)
+    def get_logits(self,
+                   data: 'list[Sample] | list[tuple[str, str, str]]',
+                   ) -> torch.Tensor:
+        if False and isinstance(data[0], 'Sample'):
+            genres = [x.annotation.genre for x in data]
+            context_words = [" ".join(x.annotation.keywords) for x in data]
+            lyrics = [x.lyrics for x in data]
+        else:
+            genres, context_words, lyrics = map(list, zip(*data))
 
-        def sample_top_k(logits, k=50):
-            k = min(k, logits.size(-1))
-            top_k_logits, top_k_indices = torch.topk(logits, k)
-            probs = F.softmax(top_k_logits, dim=-1)
-            sampled_idx = torch.multinomial(probs, num_samples=1)
-            return top_k_indices[sampled_idx]
+        language_model = self.get_language_model()
+        language_model.eval()
+        device = next(language_model.parameters()).device
 
-        starting_ids = self.tokenize_text(starting_token + starting_words)
-        ending_ids = self.tokenize_text(end_token)
-        genre_id = self.tokenize_text(genre)
-        context_ids = self.tokenize_text(" ".join(context_words))
-        annotation_ids = genre_id + context_ids
+        annotations = self.tokenize_text([g + " " + c for g, c in zip(genres, context_words)])
+        lyrics = self.tokenize_text(lyrics)
+        annotations, lyrics = pad_lists(annotations), pad_lists(lyrics)
 
-        device = next(self.language_model.parameters()).device
-        input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
-        ending_ids = torch.tensor(ending_ids, device=device)
-        annotation_ids = torch.tensor([annotation_ids], device=device)
+        annotations = torch.tensor(annotations, dtype=torch.long, device=device)
+        lyrics = torch.tensor(lyrics, dtype=torch.long, device=device)
 
-        self.language_model.eval()
+        return self.language_model(annotations, lyrics, True)
+
+    @torch.no_grad()
+    def bulk_inference(self,
+                       genres: str | list[str],
+                       context_words: str | list[str],
+                       starting_words: str | list[str] = "",
+                       starting_token="<SONG_START>", end_token="<SONG_END>",
+                       max_len=200, n_songs: int = None,
+                       temperature=1.0, top_k=50,
+                       _temperature_epsilon=1e-4,
+                       ) -> list[str]:
+        # Data Sanity Checks
+
+        if n_songs is None:
+            if isinstance(genres, list): n_songs = len(genres)
+            elif isinstance(context_words, list): n_songs = len(context_words)
+            elif isinstance(starting_words, list): n_songs = len(starting_words)
+            else: raise ValueError("Please provide either a list of genres, a list of context words, a list of starting words, or n_songs.")
+
+        if isinstance(genres, str): genres = [genres] * n_songs
+        if isinstance(context_words, str): context_words = [context_words] * n_songs
+        if isinstance(starting_words, str): starting_words = [starting_words] * n_songs
+
+        assert len(genres) == len(context_words) == len(starting_words)
+
+        # Retrieving the language model
+
+        language_model = self.get_language_model()
+        device = next(language_model.parameters()).device
+        language_model.eval()
+
+        # Some helper methods
+
+        def sample_batch(logits: torch.Tensor) -> torch.Tensor:
+            """
+            Sample one next token per row.  Returns shape (B, 1).
+
+            Temperature fix: below TEMP_EPS we fall back to argmax (greedy),
+            which avoids the softmax overflow that crashes the GPU at tiny temps.
+            The top-k mask uses scatter so it never materializes a huge intermediate.
+            """
+            if temperature < _temperature_epsilon:
+                return logits.argmax(dim=-1, keepdim=True)  # (B, 1)
+            scaled = logits / temperature
+
+            # Top-k: zero out everything outside the k best positions
+            k = min(top_k, scaled.size(-1))
+            top_k_vals, top_k_idx = torch.topk(scaled, k, dim=-1)  # (B, k)
+            # Build an -inf mask and scatter the top-k values back in
+            filtered = torch.full_like(scaled, float('-inf'))
+            filtered.scatter_(1, top_k_idx, top_k_vals)  # (B, V)
+
+            probs = F.softmax(filtered, dim=-1)
+            return torch.multinomial(probs, num_samples=1)  # (B, 1)
+
+        # A new title
+
+        starting_words = [(starting_token if s == '' else starting_token + " " + s) for s in starting_words]
+
+        starting_ids = self.tokenize_text(starting_words)
+        annotation_ids = self.tokenize_text([g + " " + c for g, c in zip(genres, context_words)])
+        starting_ids, annotation_ids = pad_lists(starting_ids), pad_lists(annotation_ids)
+
+        input_ids = torch.tensor(starting_ids, device=device)
+        annotation_ids = torch.tensor(annotation_ids, device=device)
+
         for _ in range(max_len):
             preds = self.language_model(annotation_ids, input_ids)
-            preds = preds / temperature
-            next_token = sample_top_k(preds.squeeze(0), k=top_k)
+            next_token = sample_batch(preds)
 
-            input_ids = torch.cat([input_ids, next_token.view(1, 1)], dim=1)
-            if ends_with(input_ids, ending_ids): break
+            input_ids = torch.cat([input_ids, next_token], dim=1)
 
-        input_ids = input_ids.squeeze(0).tolist()
-        return self.detokenize_ids(input_ids)
-
-    def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
-        # We are not using annotations, therefore, we return the embeds as is.
-        return embeds
-
-    def prepare_model(self) -> nn.Module:
-        return None
-        # return M2OLSTM(len(self.vocabulary))
-
-    def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
-        sample = torch.asarray(sample, dtype=torch.long)
-        for i in range(1, len(sample)):
-            yield sample[:i], sample[i]
-
-    def collate_batch(self, batch: list['TrainingData']) -> 'BatchedTrainingData':
-        xs, ys = list(zip(*batch))
-        lengths = torch.tensor([len(x) for x in xs])
-        xs = pad_sequence(xs, batch_first=True, padding_value=0)
-        ys = torch.stack(ys)
-        return xs, lengths, ys
-
-    def train(self, model: 'nn.Module', sample: 'Sample'):
-        super().train(model, sample)
-
-    def evaluate(self, model: 'nn.Module', sample: 'Sample'):
-        super().generate(model, sample)
+        input_ids = input_ids.cpu().tolist()
+        generated_songs = self.detokenize_ids(input_ids)
+        generated_songs = [(song if end_token not in song else song.split(end_token, 1)[0]) for song in generated_songs]
+        return list(map(self.pollute_text, generated_songs))

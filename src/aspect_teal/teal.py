@@ -4,7 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from torch.nn.utils.rnn import pad_sequence
 
 from generator_core import *
-from aspect_midnight import Word2Vec_SkipGram, ArrayToDatasetForW2V
+from aspect_midnight import Word2Vec_SkipGram, ArrayToDatasetForW2V, Midnight
 
 from .transformer_lm import TransformerModel, TransformerDataset
 
@@ -35,26 +35,19 @@ class Teal(Solution):
         Initialize all mid-state helpers
         """
 
-        self.custom_tokens = set()
-        self.genre_to_id = dict()
+        self.midnight = Midnight(ds_data, skip_model_loading=True)
 
-        self.ds_data = self._prepare_ds_data(ds_data)
+        self.ds_data = self.midnight.ds_data
         self.custom_tokens = self._get_custom_tokens()
         self.custom_tokens.add('<NEW_LINE>')
-        self.genre_to_id = self._get_genre_dict()
+        self.genre_to_id = self.midnight.genre_to_id
         self.id_to_genre = {v: k for k, v in self.genre_to_id.items()}
         self.tfidf = self._prepare_tfidf()
         self.feature_names = self.tfidf.get_feature_names_out()
-        
+
         self.vocabulary = self._prepare_vocabulary()
         self.embedder = self._prepare_embedder()
         self.language_model = self._prepare_language_model()
-
-    @cached()
-    def _prepare_ds_data(self, ds_data):
-        ds_data = ds_data.copy()
-        ds_data['lyrics'] = ds_data['lyrics'].apply(self.clean_text)
-        return ds_data
 
     @cached()
     def _get_custom_tokens(self):
@@ -85,7 +78,7 @@ class Teal(Solution):
 
     def _prepare_vocabulary(self):
         # VERIFY: Specify custom_tokens
-        spm_file = os.path.join('temp', 'lyrics_sp.model')
+        spm_file = os.path.join('temp', 'Teal.lyrics_sp.model')
         if not os.path.exists(spm_file):
             temp_save = os.path.join('temp', 'lyrics_clean.csv')
             with open(os.path.join('temp', 'lyrics_clean.csv'), 'w', encoding='utf-8') as f:
@@ -116,11 +109,11 @@ class Teal(Solution):
         )
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
         return word2vec
-    
-    
+
+
     def model_train_step(self, model, data):
         return model(data[0])
-    
+
     def model_criteria_step(self, criterion, preds, truth):
         preds = preds.permute(0, 2, 1)  # (B, V, T)
         return criterion(preds, truth)
@@ -132,24 +125,24 @@ class Teal(Solution):
             "n_heads": 4,
             "n_groups": 2,
             "n_layers": 4
-            
+
         }
-    
+
         model = TransformerModel(
             vocab_size=self.vocabulary.vocab_size(),
             config=config,
             embedding_weights=self.embedder.embeddings.weight
         )
-    
+
         dataset = TransformerDataset(self)
-    
+
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=10,
             shuffle=True,
             collate_fn=dataset.collate_fn
         )
-        
+
         model.trainer = Trainer(
             model=model,
             train_dataloader=dataloader,
@@ -161,8 +154,26 @@ class Teal(Solution):
             record_per_batch_training_loss=True,
             checkpoint_frequency_batch=10,
         )
-    
+
         return model
+
+    def get_data_size(self) -> int:
+        return self.ds_data.shape[0]
+
+    def get_lyrics(self, lyrics_id: int) -> str:
+        return self.ds_data.iloc[lyrics_id]['lyrics']
+
+    def get_genre(self, lyrics_id: int) -> str:
+        return self.ds_data.iloc[lyrics_id]['tag']
+
+    def get_pretrained_embedder(self) -> torch.nn.Embedding:
+        return self.embedder.embeddings
+
+    def get_posttrained_embedder(self) -> torch.nn.Embedding:
+        return self.language_model.embed
+
+    def get_language_model(self) -> torch.nn.Module:
+        return self.language_model
 
     def clean_text(self, text: str) -> str:
         text = text.strip().lower()  # To lower case
@@ -220,8 +231,9 @@ class Teal(Solution):
         top_indices = np.argsort(row_data)[-k:]
         return [self.feature_names[i] for i in top_indices if row_data[i] > 0]
 
-    def get_context_words(self, text, k=5):
-        return self._get_top_k_words(self.tfidf.transform([text]), k=k)
+    def get_context_words(self, data, k=5):
+        lyrics = self._get_lyrics(data)
+        return self._get_top_k_words(self.tfidf.transform([lyrics]), k=k)
 
     def annotate_text(self, id: int, k=5) -> Annotation:
         text = self.ds_data.iloc[id]['lyrics']
@@ -231,6 +243,9 @@ class Teal(Solution):
 
     def tokenize_text(self, data: str) -> list[int]:
         if isinstance(data, int): data = self.ds_data.iloc[data]['lyrics']
+        return self.vocabulary.encode_as_ids(data)
+
+    def tokenize_genre(self, data: str) -> list[int]:
         return self.vocabulary.encode_as_ids(data)
 
     def detokenize_ids(self, data: list[int]) -> list[str]:
@@ -246,6 +261,28 @@ class Teal(Solution):
         return embeds
 
     @torch.no_grad()
+    def get_logits(self, data: list[str] | list[int]):
+        if isinstance(data[0], Sample):
+            genres = [x.annotation.genre for x in data]
+            context_words = [" ".join(x.annotation.keywords) for x in data]
+            lyrics = [x.lyrics for x in data]
+        else:
+            genres, context_words, lyrics = map(list, zip(*data))
+
+        lyrics = [f"genre {g} {c} {l}" for g, c, l in zip(genres, context_words, lyrics)]
+        lyrics = self.tokenize_text(lyrics)
+        lyrics = pad_lists(lyrics, fill_value=0)
+
+        language_model = self.get_language_model()
+        language_model.eval()
+        device = next(language_model.parameters()).device
+
+        lyrics = torch.tensor(lyrics, dtype=torch.long, device=device)
+
+        logits = language_model(lyrics)
+        return logits
+
+    @torch.no_grad()
     def inference(self,
                   genre: str, context_words: list[str],
                   starting_words="",
@@ -259,38 +296,38 @@ class Teal(Solution):
 
         def sample_top_k_top_p(logits, prev_tokens, top_k=50, top_p=0.9, temperature=0.9, penalty=1.2):
             logits = logits / temperature
-        
+
             for token in set(prev_tokens):
                 logits[token] /= penalty
-        
+
             probs = F.softmax(logits, dim=-1)
-        
+
             # top-k
             if top_k is not None:
                 top_k = min(top_k, probs.size(-1))
                 probs_topk, indices_topk = torch.topk(probs, top_k)
             else:
                 probs_topk, indices_topk = probs, torch.arange(len(probs), device=probs.device)
-        
+
             # sort
             sorted_probs, sorted_indices = torch.sort(probs_topk, descending=True)
             cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-        
+
             # top-p cutoff
             cutoff = cumulative_probs > top_p
             cutoff[..., 1:] = cutoff[..., :-1].clone()
             cutoff[..., 0] = False
-        
+
             sorted_probs[cutoff] = 0
             sorted_probs /= sorted_probs.sum()
-        
+
             sampled_idx = torch.multinomial(sorted_probs, 1)
             return indices_topk[sorted_indices[sampled_idx]]
 
         genre_token = f"genre {genre}"
         cond_text = genre_token + " " + " ".join(context_words)
 
-        starting_ids = self.tokenize_text(cond_text + " " + starting_token + " " +starting_words)
+        starting_ids = self.tokenize_text(cond_text + " " + starting_token + " " + starting_words)
         # starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
         # genre_id = self.genre_to_id[genre]
@@ -310,7 +347,7 @@ class Teal(Solution):
             preds = preds[:, -1, :]
             logits = preds.squeeze(0)
             prev_tokens = input_ids.squeeze(0).tolist()
-            
+
             next_token = sample_top_k_top_p(
                 logits,
                 prev_tokens,
@@ -328,35 +365,104 @@ class Teal(Solution):
 
         # Find start token
         start_idx = output_text.find(starting_token)
-        
+
         if start_idx != -1:
             output_text = output_text[start_idx:]
-        
+
         return output_text
         # return self.detokenize_ids(input_ids)
 
-    def inject_sample(self, embeds: np.ndarray, annotation: Annotation) -> 'Sample':
-        # We are not using annotations, therefore, we return the embeds as is.
-        return embeds
+    @torch.no_grad()
+    def bulk_inference(self,
+                       genres: str | list[str],
+                       context_words: str | list[str],
+                       starting_words: str | list[str] = "",
+                       starting_token="<SONG_START>", end_token="<SONG_END>",
+                       max_len=200, n_songs: int = None,
+                       temperature=0.9, top_k=50, top_p=0.9, penalty=1.2,
+                       solstice_cutoff=None,
+                       _temperature_epsilon=1e-4,
+                       ) -> list[str]:
+        # Data Sanity Checks
 
-    def prepare_model(self) -> nn.Module:
-        return None
-        # return M2OLSTM(len(self.vocabulary))
+        if n_songs is None:
+            if isinstance(genres, list): n_songs = len(genres)
+            elif isinstance(context_words, list): n_songs = len(context_words)
+            elif isinstance(starting_words, list): n_songs = len(starting_words)
+            else: raise ValueError("Please provide either a list of genres, a list of context words, a list of starting words, or n_songs.")
 
-    def sample_to_training_data(self, sample: 'Sample') -> 'Generator[TrainingData]':
-        sample = torch.asarray(sample, dtype=torch.long)
-        for i in range(1, len(sample)):
-            yield sample[:i], sample[i]
+        if isinstance(genres, str): genres = [genres] * n_songs
+        if isinstance(context_words, str): context_words = [context_words] * n_songs
+        if isinstance(starting_words, str): starting_words = [starting_words] * n_songs
 
-    def collate_batch(self, batch: list['TrainingData']) -> 'BatchedTrainingData':
-        xs, ys = list(zip(*batch))
-        lengths = torch.tensor([len(x) for x in xs])
-        xs = pad_sequence(xs, batch_first=True, padding_value=0)
-        ys = torch.stack(ys)
-        return xs, lengths, ys
+        assert len(genres) == len(context_words) == len(starting_words)
 
-    def train(self, model: 'nn.Module', sample: 'Sample'):
-        super().train(model, sample)
+        # Retrieving the language model
 
-    def evaluate(self, model: 'nn.Module', sample: 'Sample'):
-        super().generate(model, sample)
+        language_model = self.get_language_model()
+        device = next(language_model.parameters()).device
+        language_model.eval()
+
+        # Some helper methods
+
+        def sample_batch(logits: torch.Tensor, prev_tokens) -> torch.Tensor:
+            """
+            Sample one next token per row.  Returns shape (B, 1).
+
+            Temperature fix: below TEMP_EPS we fall back to argmax (greedy),
+            which avoids the softmax overflow that crashes the GPU at tiny temps.
+            The top-k mask uses scatter so it never materializes a huge intermediate.
+            """
+            if temperature < _temperature_epsilon:
+                return logits.argmax(dim=-1, keepdim=True)  # (B, 1)
+            logits = logits / temperature
+
+            for token in prev_tokens:
+                logits[:, token] /= penalty
+
+            probs = F.softmax(logits, dim=-1)
+
+            # top-k
+            probs_topk, indices_topk = torch.topk(probs, min(top_k, probs.size(-1)))
+
+            # sort
+            sorted_probs, sorted_indices = torch.sort(probs_topk, descending=True)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+            # top-p cutoff
+            cutoff = cumulative_probs > top_p
+            cutoff[..., 1:] = cutoff[..., :-1].clone()
+            cutoff[..., 0] = False
+
+            sorted_probs[cutoff] = 0
+            sorted_probs /= sorted_probs.sum()
+
+            sampled_idx = torch.multinomial(sorted_probs, 1)
+            sampled_idx = [sorted_indices[i, x] for i, x in enumerate(sampled_idx)]
+            sampled_idx = [indices_topk[i, x] for i, x in enumerate(sampled_idx)]
+            return torch.tensor(sampled_idx, device=device, dtype=torch.long).unsqueeze(1)
+
+        # A new title
+
+        starting_words = [(starting_token if s == '' else starting_token + " " + s) for s in starting_words]
+
+        starting_ids = self.tokenize_text(starting_words)
+        annotation_ids = self.tokenize_text(["genre " + g + " " + c for g, c in zip(genres, context_words)])
+        starting_ids = [a + s for s, a in zip(starting_ids, annotation_ids)]
+        starting_ids = pad_lists(starting_ids)
+
+        input_ids = torch.tensor(starting_ids, device=device)
+
+        for _ in range(max_len):
+            if solstice_cutoff is not None and input_ids.size(1) > solstice_cutoff:
+                preds = self.language_model(input_ids[:, -solstice_cutoff:])
+            else:
+                preds = self.language_model(input_ids)
+            next_token = sample_batch(preds[:, -1, :], set(input_ids.flatten().tolist()))
+
+            input_ids = torch.cat([input_ids, next_token.view(-1, 1)], dim=1)
+
+        input_ids = input_ids.cpu().tolist()
+        generated_songs = self.detokenize_ids(input_ids)
+        generated_songs = [(song if end_token not in song else song.split(end_token, 1)[0]) for song in generated_songs]
+        return list(map(self.pollute_text, generated_songs))
