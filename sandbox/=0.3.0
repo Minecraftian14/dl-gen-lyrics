@@ -1,0 +1,21 @@
+Collecting mauve-text
+  Downloading mauve_text-0.4.0-py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: numpy>=1.18.1 in /usr/local/lib/python3.12/dist-packages (from mauve-text) (2.0.2)
+Requirement already satisfied: scikit-learn>=0.22.1 in /usr/local/lib/python3.12/dist-packages (from mauve-text) (1.6.1)
+Collecting faiss-cpu>=1.7.0 (from mauve-text)
+  Downloading faiss_cpu-1.13.2-cp310-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (7.6 kB)
+Requirement already satisfied: tqdm>=4.40.0 in /usr/local/lib/python3.12/dist-packages (from mauve-text) (4.67.3)
+Requirement already satisfied: requests in /usr/local/lib/python3.12/dist-packages (from mauve-text) (2.32.4)
+Requirement already satisfied: packaging in /usr/local/lib/python3.12/dist-packages (from faiss-cpu>=1.7.0->mauve-text) (26.0)
+Requirement already satisfied: scipy>=1.6.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn>=0.22.1->mauve-text) (1.16.3)
+Requirement already satisfied: joblib>=1.2.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn>=0.22.1->mauve-text) (1.5.3)
+Requirement already satisfied: threadpoolctl>=3.1.0 in /usr/local/lib/python3.12/dist-packages (from scikit-learn>=0.22.1->mauve-text) (3.6.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/dist-packages (from requests->mauve-text) (3.4.7)
+Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/dist-packages (from requests->mauve-text) (3.11)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /usr/local/lib/python3.12/dist-packages (from requests->mauve-text) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in /usr/local/lib/python3.12/dist-packages (from requests->mauve-text) (2026.2.25)
+Downloading mauve_text-0.4.0-py3-none-any.whl (21 kB)
+Downloading faiss_cpu-1.13.2-cp310-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (23.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 23.8/23.8 MB 89.4 MB/s eta 0:00:00
+Installing collected packages: faiss-cpu, mauve-text
+Successfully installed faiss-cpu-1.13.2 mauve-text-0.4.0
