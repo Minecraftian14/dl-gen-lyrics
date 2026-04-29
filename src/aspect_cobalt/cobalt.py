@@ -1,4 +1,5 @@
 import torch.nn.functional as F
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
 from torch import optim
 from torch.utils import data
 
@@ -62,20 +63,20 @@ class Cobalt(Solution):
     def _model_criteria_step(self, criterion, preds, truth):
         preds = preds[0].permute(0, 2, 1)
         return criterion(preds, truth)
-        
+
     def cache_checkpoint_callback(self, model_ref, epoch, iteration):
         import os
         import torch
         from generator_core.other_utilities import key_cached
         from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
-        
+
         # 1. Conditionally save cache
         if getattr(model_ref, 'save_cache_periodically', True):
             flight = 'Cobalt._prepare_language_model.cached'
             for file in ['bone', 'pkl']:
                 file_path = os.path.join('temp', f'{flight}.{file}')
                 if os.path.exists(file_path): os.remove(file_path)
-                
+
             key_cached('cached', lambda: model_ref, group='Cobalt._prepare_language_model')
             print(f"Saved {flight} cache at epoch {epoch}, iteration {iteration}")
 
@@ -86,16 +87,16 @@ class Cobalt(Solution):
             for input_ids, target_ids in loader:
                 input_ids = input_ids.to(next(model_ref.parameters()).device)
                 target_ids = target_ids.to(next(model_ref.parameters()).device)
-                
+
                 logits, _ = model_ref(input_ids)
                 preds = logits.argmax(dim=-1)
-                
+
                 hypotheses_all = []
                 references_all = []
                 for b in range(preds.size(0)):
                     hypotheses_all.append([str(t.item()) for t in preds[b]])
                     references_all.append([[str(t.item()) for t in target_ids[b]]])
-                    
+
                 bleu = corpus_bleu(
                     references_all,
                     hypotheses_all,
@@ -106,25 +107,45 @@ class Cobalt(Solution):
                 break  # Stop after 1 batch
         model_ref.train()
 
+    @torch.no_grad()
+    def display_metrics(self, trainer: Trainer, local_variables: dict):
+        # print(local_variables)
+        logits, targets = local_variables['predictions'][0].detach(), local_variables['batch_data'][1].detach()
+        preds = logits.argmax(dim=-1)
+
+        hypotheses_all = []
+        references_all = []
+        for b in range(preds.size(0)):
+            hypotheses_all.append([str(t.item()) for t in preds[b]])
+            references_all.append([[str(t.item()) for t in targets[b]]])
+
+        bleu = corpus_bleu(
+            references_all,
+            hypotheses_all,
+            weights=(0.25, 0.25, 0.25, 0.25),
+            smoothing_function=SmoothingFunction().method4,
+        )
+        return [("Bleu Score", bleu)]
+
     @cached()
     def _prepare_language_model(self):
         SAVE_CACHE_PERIODICALLY = True  # Toggle this True/False
-        
+
         model = BiGRULyricsModel(
             vocab_size=self.vocabulary.vocab_size(),
             embed_dim=512,
-            hidden_dim=512,
-            num_layers=2,
-            dropout=0.3,
+            hidden_dim=368,
+            num_layers=4,
+            dropout=0.2,
             pad_id=0,
             word2vec_weights=self.embedder.embeddings.weight,
             word2vec_frozen=True,
         )
         model.save_cache_periodically = SAVE_CACHE_PERIODICALLY
-        
+
         dataloader = data.DataLoader(
             LyricsDataset(self.training_data),
-            batch_size=64,
+            batch_size=20,
             shuffle=True,
             collate_fn=tetra_collate_fn,
         )
@@ -138,20 +159,22 @@ class Cobalt(Solution):
             record_per_batch_training_loss=True,
             model_train_step=self._model_train_step,
             model_criteria_step=self._model_criteria_step,
-            on_batch_callback=self.cache_checkpoint_callback,
-            on_batch_callback_frequency=50,
+            checkpoint_frequency_batch=50,
+            # on_batch_callback=self.cache_checkpoint_callback,
+            # on_batch_callback_frequency=50,
+            display_metrics=self.display_metrics
         )
         return model
 
     def get_data_size(self) -> int:
         return self.ds_data.shape[0]
-    
+
     def get_lyrics(self, lyrics_id: int) -> str:
         return self.ds_data.iloc[lyrics_id]['lyrics']
 
     def get_genre(self, lyrics_id: int) -> str:
         return self.ds_data.iloc[lyrics_id]['tag']
-    
+
     def get_pretrained_embedder(self) -> torch.nn.Embedding:
         return self.embedder.embeddings
 
@@ -167,10 +190,10 @@ class Cobalt(Solution):
         Each song is separated by 2 blank lines for LLM-as-a-judge evaluation.
         """
         import random
-        
+
         # Ensure we have valid genres and sample context words from our dataset
         genres = list(self.ds_data['tag'].unique())
-        
+
         with open(output_file, 'w', encoding='utf-8') as f:
             for i in range(n_songs):
                 # Pick a random genre and use random words as contextual themes
@@ -178,26 +201,26 @@ class Cobalt(Solution):
                 # Just get random keywords from a random song that matched this genre
                 sample_text = self.ds_data[self.ds_data['tag'] == genre].sample(1).iloc[0]['lyrics']
                 context_words = self.get_context_words(sample_text, k=3)
-                
-                print(f"Generating song {i+1}/{n_songs} [Genre: {genre}, Themes: {context_words}]...")
-                
+
+                print(f"Generating song {i + 1}/{n_songs} [Genre: {genre}, Themes: {context_words}]...")
+
                 tokens = self.inference(
-                    genre=genre, 
-                    context_words=context_words, 
-                    max_len=max_len, 
+                    genre=genre,
+                    context_words=context_words,
+                    max_len=max_len,
                     temperature=temperature
                 )
-                
+
                 # Format the generated string back to normal human text
                 song_text = self.pollute_text(tokens)
-                
+
                 # Write to the evaluation file
-                f.write(f"--- Song {i+1} ---\n")
+                f.write(f"--- Song {i + 1} ---\n")
                 f.write(f"Genre: {genre}\n")
                 f.write(f"Themes: {', '.join(context_words)}\n")
                 f.write(f"Lyrics:\n{song_text}\n")
                 f.write("\n\n\n")
-                
+
         print(f"Successfully saved {n_songs} songs to {output_file}")
 
     def clean_text(self, text: str) -> str:
@@ -241,13 +264,18 @@ class Cobalt(Solution):
             sampled_idx = torch.multinomial(probs, num_samples=1)
             return top_k_indices[sampled_idx]
 
-        starting_ids = self.tokenize_text(starting_token + starting_words)
+        # starting_ids = self.tokenize_text(starting_token + starting_words)
         ending_ids = self.tokenize_text(end_token)
-        genre_id = self.tokenize_text(f"<genre_{genre}>")
-        context_ids = self.tokenize_text(" ".join([f"<theme_{t}>" for t in context_words]))
-        annotation_ids = genre_id + context_ids
+        # genre_id = self.tokenize_text(f"<genre_{genre}>")
+        # context_ids = self.tokenize_text(" ".join([f"<theme_{t}>" for t in context_words]))
+        # annotation_ids = genre_id + context_ids
+        #
+        # starting_ids = annotation_ids + starting_ids
 
-        starting_ids = annotation_ids + starting_ids
+        starting_ids = self.tokenize_text(
+            f"<genre_{genre}> " + " ".join([f"<theme_{t}>" for t in context_words]) +
+            " " + starting_token + starting_words
+        )
 
         device = next(self.language_model.parameters()).device
         input_ids = torch.tensor(starting_ids, device=device).unsqueeze(0)
@@ -276,22 +304,22 @@ class Cobalt(Solution):
         sequences = []
         for item in data:
             if hasattr(item, 'annotation'):
-                genre     = item.annotation.genre
+                genre = item.annotation.genre
                 ctx_words = item.annotation.keywords
-                lyrics    = item.lyrics
+                lyrics = item.lyrics
             else:
                 genre, ctx_words, lyrics = item
                 if isinstance(ctx_words, str):
                     ctx_words = ctx_words.split()
 
-            genre_ids   = self.tokenize_text(f"<genre_{genre}>")
+            genre_ids = self.tokenize_text(f"<genre_{genre}>")
             context_ids = self.tokenize_text(" ".join([f"<theme_{t}>" for t in ctx_words]))
-            lyrics_ids  = self.tokenize_text(lyrics)
+            lyrics_ids = self.tokenize_text(lyrics)
             sequences.append(genre_ids + context_ids + lyrics_ids)
 
         max_len = max(len(s) for s in sequences)
-        device  = next(self.language_model.parameters()).device
-        padded  = torch.zeros(len(sequences), max_len, dtype=torch.long, device=device)
+        device = next(self.language_model.parameters()).device
+        padded = torch.zeros(len(sequences), max_len, dtype=torch.long, device=device)
         for i, seq in enumerate(sequences):
             padded[i, :len(seq)] = torch.tensor(seq, dtype=torch.long, device=device)
 
@@ -318,7 +346,7 @@ class Cobalt(Solution):
             else:
                 raise ValueError("Provide a list or explicitly define n_songs.")
 
-        if isinstance(genres, str):         genres        = [genres]        * n_songs
+        if isinstance(genres, str):         genres = [genres] * n_songs
         if isinstance(context_words, str):  context_words = [context_words] * n_songs
         if isinstance(starting_words, str): starting_words = [starting_words] * n_songs
 
@@ -326,7 +354,7 @@ class Cobalt(Solution):
             logits = logits / max(temperature, 1e-8)
             k = min(top_k, logits.size(-1))
             top_k_logits, top_k_indices = torch.topk(logits, k, dim=-1)
-            probs   = F.softmax(top_k_logits, dim=-1)
+            probs = F.softmax(top_k_logits, dim=-1)
             sampled = torch.multinomial(probs, num_samples=1)
             return top_k_indices.gather(1, sampled)
 
@@ -335,10 +363,10 @@ class Cobalt(Solution):
 
         prefix_token_lists = []
         for genre, ctx, sw in zip(genres, context_words, starting_words):
-            ctx_list    = ctx.split() if isinstance(ctx, str) else ctx
-            genre_ids   = self.tokenize_text(f"<genre_{genre}>")
+            ctx_list = ctx.split() if isinstance(ctx, str) else ctx
+            genre_ids = self.tokenize_text(f"<genre_{genre}>")
             context_ids = self.tokenize_text(" ".join([f"<theme_{t}>" for t in ctx_list]))
-            start_ids   = self.tokenize_text(starting_token + sw)
+            start_ids = self.tokenize_text(starting_token + sw)
             prefix_token_lists.append(genre_ids + context_ids + start_ids)
 
         end_ids = self.tokenize_text(end_token)
@@ -350,7 +378,7 @@ class Cobalt(Solution):
             input_ids[i, :len(p)] = torch.tensor(p, dtype=torch.long, device=device)
 
         generated = [list(p) for p in prefix_token_lists]
-        finished  = [False] * n_songs
+        finished = [False] * n_songs
 
         for _ in range(max_len):
             if all(finished): break
