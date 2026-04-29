@@ -75,8 +75,8 @@ BIDIRECTIONAL      = True
 # ─────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────
-BATCH_SIZE         = 64
-SEQ_LEN            = 128           # tokens per training window
+BATCH_SIZE         = 20
+SEQ_LEN            = 1024           # tokens per training window
 EPOCHS             = 30
 LEARNING_RATE      = 3e-4
 WEIGHT_DECAY       = 1e-5

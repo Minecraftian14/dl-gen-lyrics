@@ -43,8 +43,52 @@ class Red(Solution):
         self.embedder = self.midnight.embedder
         self.language_model = self._prepare_language_model()
 
+    def cache_checkpoint_callback_red(self, model_ref, epoch, iteration):
+        import os
+        import torch
+        from generator_core.other_utilities import key_cached
+        from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+
+        if getattr(model_ref, 'save_cache_periodically', True):
+            flight = 'Red._prepare_language_model.cached'
+            for file in ['bone', 'pkl']:
+                file_path = os.path.join('temp', f'{flight}.{file}')
+                if os.path.exists(file_path): os.remove(file_path)
+                
+            key_cached('cached', lambda: model_ref, group='Red._prepare_language_model')
+            print(f"Saved {flight} cache at epoch {epoch}, iteration {iteration}")
+
+        model_ref.eval()
+        with torch.no_grad():
+            loader = model_ref.trainer.train_dataloader
+            for batch_inputs, target_ids in loader:
+                padded_anns, windows_x = batch_inputs
+                padded_anns = padded_anns.to(next(model_ref.parameters()).device)
+                windows_x = windows_x.to(next(model_ref.parameters()).device)
+                target_ids = target_ids.to(next(model_ref.parameters()).device)
+                
+                logits = model_ref(padded_anns, windows_x)
+                preds = logits.argmax(dim=-1)
+                
+                hypotheses_all = []
+                references_all = []
+                for b in range(preds.size(0)):
+                    hypotheses_all.append([str(t.item()) for t in preds[b]])
+                    references_all.append([[str(t.item()) for t in target_ids[b]]])
+                    
+                bleu = corpus_bleu(
+                    references_all,
+                    hypotheses_all,
+                    weights=(0.25, 0.25, 0.25, 0.25),
+                    smoothing_function=SmoothingFunction().method4,
+                )
+                print(f"Training BLEU Score (Epoch {epoch}, Iter {iteration}): {bleu:.4f}")
+                break
+        model_ref.train()
+
     @cached()
     def _prepare_language_model(self):
+        SAVE_CACHE_PERIODICALLY = False
         edm = EncoderDecoderLSTM(
             vocab_size=self.vocabulary.vocab_size(),
             embed_dim=512,
@@ -53,6 +97,9 @@ class Red(Solution):
             embeddings_weight=self.embedder.embeddings.weight,
         )
         edm.prepare_train(SlidingWindowDatasetTruncated(self))
+        edm.save_cache_periodically = SAVE_CACHE_PERIODICALLY
+        edm.trainer.on_batch_callback = self.cache_checkpoint_callback_red
+        edm.trainer.on_batch_callback_frequency = 50
         return edm
 
     def clean_text(self, text: str) -> str:

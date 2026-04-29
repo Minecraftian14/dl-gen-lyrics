@@ -114,8 +114,54 @@ class Midnight(Solution):
         word2vec.prepare_train(ArrayToDatasetForW2V(self.ds_data['lyrics']))
         return word2vec
 
+    def cache_checkpoint_callback(self, model_ref, epoch, iteration):
+        import os
+        import torch
+        from generator_core.other_utilities import key_cached
+        from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+
+        if getattr(model_ref, 'save_cache_periodically', True):
+            flight = 'Midnight._prepare_language_model.cached'
+            for file in ['bone', 'pkl']:
+                file_path = os.path.join('temp', f'{flight}.{file}')
+                if os.path.exists(file_path): os.remove(file_path)
+                
+            key_cached('cached', lambda: model_ref, group='Midnight._prepare_language_model')
+            print(f"Saved {flight} cache at epoch {epoch}, iteration {iteration}")
+
+        model_ref.eval()
+        with torch.no_grad():
+            loader = model_ref.trainer.train_dataloader
+            for batch_inputs, target_ids in loader:
+                input_ids, context_ids, lengths, genres = batch_inputs
+                input_ids = input_ids.to(next(model_ref.parameters()).device)
+                context_ids = context_ids.to(next(model_ref.parameters()).device)
+                lengths = lengths.to(next(model_ref.parameters()).device)
+                genres = genres.to(next(model_ref.parameters()).device)
+                target_ids = target_ids.to(next(model_ref.parameters()).device)
+                
+                logits = model_ref(input_ids, context_ids, lengths, genres)
+                preds = logits.argmax(dim=-1)
+                
+                hypotheses_all = []
+                references_all = []
+                for b in range(preds.size(0)):
+                    hypotheses_all.append([str(t.item()) for t in preds[b]])
+                    references_all.append([[str(t.item()) for t in target_ids[b]]])
+                    
+                bleu = corpus_bleu(
+                    references_all,
+                    hypotheses_all,
+                    weights=(0.25, 0.25, 0.25, 0.25),
+                    smoothing_function=SmoothingFunction().method4,
+                )
+                print(f"Training BLEU Score (Epoch {epoch}, Iter {iteration}): {bleu:.4f}")
+                break
+        model_ref.train()
+
     @cached()
     def _prepare_language_model(self):
+        SAVE_CACHE_PERIODICALLY = False
         lstm = ConditionalLSTMLM(
             vocab_size=self.vocabulary.vocab_size(),
             embedding_dim=512,
@@ -127,6 +173,9 @@ class Midnight(Solution):
             word2vec_frozen=False,
         )
         lstm.prepare_train(ConditionalDataset(self))
+        lstm.save_cache_periodically = SAVE_CACHE_PERIODICALLY
+        lstm.trainer.on_batch_callback = self.cache_checkpoint_callback
+        lstm.trainer.on_batch_callback_frequency = 50
         return lstm
 
     def get_data_size(self) -> int:
