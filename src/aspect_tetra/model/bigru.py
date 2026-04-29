@@ -92,8 +92,8 @@ class BiGRULyricsModel(nn.Module):
         self.num_layers  = num_layers
         self.dropout_p   = dropout
         self.pad_id      = pad_id
-        self.bidirectional = True
-        self.num_directions = 2  # BiGRU
+        self.bidirectional = False
+        self.num_directions = 1  # BiGRU
 
         # ── Embedding ──────────────────────────────────────────────────
         if word2vec_weights is not None:
@@ -114,7 +114,7 @@ class BiGRULyricsModel(nn.Module):
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=True,
+            bidirectional=False,
         )
 
         # ── Post-GRU projection ────────────────────────────────────────
