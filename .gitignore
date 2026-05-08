@@ -8,3 +8,5 @@ secret*.*
 /.obsidian/workspace.json
 
 uv.lock
+
+.ipynb_checkpoints/
